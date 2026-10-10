@@ -1,0 +1,10 @@
+.venv
+__pycache__
+*.pyc
+evidence
+*.db
+.pytest_cache
+.ruff_cache
+tests
+scripts
+m1-out

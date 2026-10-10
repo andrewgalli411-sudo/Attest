@@ -1,0 +1,1331 @@
+{
+  "components": {
+    "schemas": {
+      "ConfigOut": {
+        "properties": {
+          "allow_custom_runs": {
+            "title": "Allow Custom Runs",
+            "type": "boolean"
+          },
+          "auth_required": {
+            "title": "Auth Required",
+            "type": "boolean"
+          },
+          "demo_enabled": {
+            "title": "Demo Enabled",
+            "type": "boolean"
+          },
+          "projects": {
+            "items": {
+              "$ref": "#/components/schemas/ProjectInfo"
+            },
+            "title": "Projects",
+            "type": "array"
+          }
+        },
+        "required": [
+          "demo_enabled",
+          "allow_custom_runs",
+          "projects",
+          "auth_required"
+        ],
+        "title": "ConfigOut",
+        "type": "object"
+      },
+      "Counts": {
+        "properties": {
+          "fixed": {
+            "title": "Fixed",
+            "type": "integer"
+          },
+          "in_progress": {
+            "title": "In Progress",
+            "type": "integer"
+          },
+          "inconclusive": {
+            "title": "Inconclusive",
+            "type": "integer"
+          },
+          "needs_human": {
+            "title": "Needs Human",
+            "type": "integer"
+          },
+          "regressions": {
+            "title": "Regressions",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total",
+          "fixed",
+          "needs_human",
+          "in_progress",
+          "inconclusive",
+          "regressions"
+        ],
+        "title": "Counts",
+        "type": "object"
+      },
+      "Dashboard": {
+        "properties": {
+          "counts": {
+            "$ref": "#/components/schemas/Counts"
+          },
+          "groups": {
+            "items": {
+              "$ref": "#/components/schemas/Group"
+            },
+            "title": "Groups",
+            "type": "array"
+          },
+          "headline": {
+            "title": "Headline",
+            "type": "string"
+          },
+          "model_kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Kind"
+          },
+          "notice": {
+            "title": "Notice",
+            "type": "string"
+          },
+          "pages": {
+            "items": {
+              "$ref": "#/components/schemas/PageOut"
+            },
+            "title": "Pages",
+            "type": "array"
+          },
+          "run": {
+            "$ref": "#/components/schemas/RunOut"
+          },
+          "score_after": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ScoreOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "score_before": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ScoreOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "severity": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Severity",
+            "type": "object"
+          }
+        },
+        "required": [
+          "run",
+          "headline",
+          "counts",
+          "severity",
+          "groups",
+          "pages",
+          "notice"
+        ],
+        "title": "Dashboard",
+        "type": "object"
+      },
+      "DecisionIn": {
+        "properties": {
+          "action": {
+            "pattern": "^(accept_pr|reject_pr|override_tier|edit_fix)$",
+            "title": "Action",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "reviewer": {
+            "default": "local",
+            "title": "Reviewer",
+            "type": "string"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "title": "DecisionIn",
+        "type": "object"
+      },
+      "DecisionOut": {
+        "properties": {
+          "action": {
+            "title": "Action",
+            "type": "string"
+          },
+          "finding_id": {
+            "title": "Finding Id",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "finding_id",
+          "action"
+        ],
+        "title": "DecisionOut",
+        "type": "object"
+      },
+      "EvidenceOut": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "payload": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Payload"
+          },
+          "stage": {
+            "title": "Stage",
+            "type": "string"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          }
+        },
+        "required": [
+          "id",
+          "stage",
+          "kind"
+        ],
+        "title": "EvidenceOut",
+        "type": "object"
+      },
+      "FindingDetail": {
+        "properties": {
+          "evidence": {
+            "items": {
+              "$ref": "#/components/schemas/EvidenceOut"
+            },
+            "title": "Evidence",
+            "type": "array"
+          },
+          "fix": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FixOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "impact_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Impact Text"
+          },
+          "notice": {
+            "title": "Notice",
+            "type": "string"
+          },
+          "page": {
+            "title": "Page",
+            "type": "string"
+          },
+          "proof": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProofOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "regression": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RegressionOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "rule_id": {
+            "title": "Rule Id",
+            "type": "string"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          },
+          "sc_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Sc Ids",
+            "type": "array"
+          },
+          "severity": {
+            "title": "Severity",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "triage": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TriageOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "run_id",
+          "rule_id",
+          "sc_ids",
+          "severity",
+          "status",
+          "page",
+          "impact_text",
+          "triage",
+          "fix",
+          "proof",
+          "regression",
+          "evidence",
+          "notice"
+        ],
+        "title": "FindingDetail",
+        "type": "object"
+      },
+      "FindingRow": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "impact_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Impact Text"
+          },
+          "page": {
+            "title": "Page",
+            "type": "string"
+          },
+          "rule_id": {
+            "title": "Rule Id",
+            "type": "string"
+          },
+          "sc_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Sc Ids",
+            "type": "array"
+          },
+          "severity": {
+            "title": "Severity",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "tier": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tier"
+          }
+        },
+        "required": [
+          "id",
+          "rule_id",
+          "sc_ids",
+          "severity",
+          "status",
+          "page"
+        ],
+        "title": "FindingRow",
+        "type": "object"
+      },
+      "FixOut": {
+        "properties": {
+          "branch": {
+            "title": "Branch",
+            "type": "string"
+          },
+          "diff": {
+            "title": "Diff",
+            "type": "string"
+          },
+          "explanation": {
+            "title": "Explanation",
+            "type": "string"
+          },
+          "pr_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pr Url"
+          },
+          "tier": {
+            "title": "Tier",
+            "type": "string"
+          }
+        },
+        "required": [
+          "diff",
+          "branch",
+          "tier",
+          "explanation"
+        ],
+        "title": "FixOut",
+        "type": "object"
+      },
+      "Group": {
+        "properties": {
+          "findings": {
+            "items": {
+              "$ref": "#/components/schemas/FindingRow"
+            },
+            "title": "Findings",
+            "type": "array"
+          },
+          "fixed": {
+            "title": "Fixed",
+            "type": "integer"
+          },
+          "needs_human": {
+            "title": "Needs Human",
+            "type": "integer"
+          },
+          "sc": {
+            "title": "Sc",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "sc",
+          "title",
+          "total",
+          "fixed",
+          "needs_human",
+          "findings"
+        ],
+        "title": "Group",
+        "type": "object"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "PageOut": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "score_after": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Score After"
+          },
+          "score_before": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Score Before"
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "path"
+        ],
+        "title": "PageOut",
+        "type": "object"
+      },
+      "ProjectInfo": {
+        "properties": {
+          "can_publish": {
+            "title": "Can Publish",
+            "type": "boolean"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "pages": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Pages",
+            "type": "array"
+          }
+        },
+        "required": [
+          "name",
+          "pages",
+          "can_publish"
+        ],
+        "title": "ProjectInfo",
+        "type": "object"
+      },
+      "ProofOut": {
+        "properties": {
+          "baseline_failed": {
+            "title": "Baseline Failed",
+            "type": "boolean"
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          },
+          "relocated": {
+            "title": "Relocated",
+            "type": "boolean"
+          },
+          "relocation_method": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Relocation Method"
+          },
+          "relocation_score": {
+            "title": "Relocation Score",
+            "type": "number"
+          },
+          "runs": {
+            "title": "Runs",
+            "type": "integer"
+          },
+          "verdict": {
+            "title": "Verdict",
+            "type": "string"
+          }
+        },
+        "required": [
+          "verdict",
+          "baseline_failed",
+          "relocated",
+          "relocation_score",
+          "runs"
+        ],
+        "title": "ProofOut",
+        "type": "object"
+      },
+      "RegressionOut": {
+        "properties": {
+          "regressions": {
+            "title": "Regressions",
+            "type": "integer"
+          },
+          "rules_checked": {
+            "title": "Rules Checked",
+            "type": "integer"
+          },
+          "verdict": {
+            "title": "Verdict",
+            "type": "string"
+          }
+        },
+        "required": [
+          "verdict",
+          "regressions",
+          "rules_checked"
+        ],
+        "title": "RegressionOut",
+        "type": "object"
+      },
+      "RunOut": {
+        "properties": {
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "headline": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Headline"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "target": {
+            "title": "Target",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "target",
+          "created_at"
+        ],
+        "title": "RunOut",
+        "type": "object"
+      },
+      "ScoreOut": {
+        "properties": {
+          "score": {
+            "title": "Score",
+            "type": "integer"
+          },
+          "worst": {
+            "title": "Worst",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "score",
+          "worst"
+        ],
+        "title": "ScoreOut",
+        "type": "object"
+      },
+      "StartRun": {
+        "description": "What a caller may ask for. Commands and repo paths come from server-side projects, not from here.",
+        "properties": {
+          "auth_cookies": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Auth Cookies",
+            "type": "array"
+          },
+          "base_branch": {
+            "default": "main",
+            "title": "Base Branch",
+            "type": "string"
+          },
+          "check_commands": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Check Commands",
+            "type": "array"
+          },
+          "demo": {
+            "default": false,
+            "title": "Demo",
+            "type": "boolean"
+          },
+          "dev_command": {
+            "default": "pnpm dev --port {port}",
+            "title": "Dev Command",
+            "type": "string"
+          },
+          "max_fixes": {
+            "anyOf": [
+              {
+                "maximum": 100.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Fixes"
+          },
+          "only_rules": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Only Rules"
+          },
+          "pages": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "override the project's pages: [{path, label}]",
+            "title": "Pages"
+          },
+          "project": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "name of an operator-defined project",
+            "title": "Project"
+          },
+          "publish": {
+            "default": false,
+            "description": "push branches and open PRs/issues; honoured only if the project allows it",
+            "title": "Publish",
+            "type": "boolean"
+          },
+          "repo_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Repo Path"
+          },
+          "with_probes": {
+            "default": false,
+            "title": "With Probes",
+            "type": "boolean"
+          }
+        },
+        "title": "StartRun",
+        "type": "object"
+      },
+      "TriageOut": {
+        "properties": {
+          "confidence": {
+            "title": "Confidence",
+            "type": "number"
+          },
+          "fix_plan": {
+            "title": "Fix Plan",
+            "type": "string"
+          },
+          "gate_notes": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Gate Notes",
+            "type": "array"
+          },
+          "pr_tier": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pr Tier"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "tier": {
+            "title": "Tier",
+            "type": "string"
+          },
+          "valid": {
+            "title": "Valid",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "tier",
+          "reason",
+          "fix_plan",
+          "confidence",
+          "valid",
+          "gate_notes"
+        ],
+        "title": "TriageOut",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "description": "Automated first pass \u2014 requires expert review. This draft is not a certification or statement of conformance.",
+    "title": "WCAG Auditor",
+    "version": "0.1.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/api/config": {
+      "get": {
+        "description": "What this server will let a caller do. Never includes commands, paths, or secrets.",
+        "operationId": "get_config_api_config_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Config"
+      }
+    },
+    "/api/evidence/{evidence_id}": {
+      "get": {
+        "operationId": "evidence_blob_api_evidence__evidence_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "evidence_id",
+            "required": true,
+            "schema": {
+              "title": "Evidence Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Evidence Blob"
+      }
+    },
+    "/api/findings/{finding_id}": {
+      "get": {
+        "operationId": "finding_detail_api_findings__finding_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "finding_id",
+            "required": true,
+            "schema": {
+              "title": "Finding Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FindingDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Finding Detail"
+      }
+    },
+    "/api/findings/{finding_id}/decision": {
+      "post": {
+        "operationId": "decide_api_findings__finding_id__decision_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "finding_id",
+            "required": true,
+            "schema": {
+              "title": "Finding Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DecisionIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DecisionOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Decide"
+      }
+    },
+    "/api/health": {
+      "get": {
+        "operationId": "health_api_health_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Health"
+      }
+    },
+    "/api/runs": {
+      "get": {
+        "operationId": "list_runs_api_runs_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/RunOut"
+                  },
+                  "title": "Response List Runs Api Runs Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Runs"
+      },
+      "post": {
+        "operationId": "start_run_api_runs_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartRun"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Start Run"
+      }
+    },
+    "/api/runs/{run_id}/cancel": {
+      "post": {
+        "operationId": "cancel_run_api_runs__run_id__cancel_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Cancel Run"
+      }
+    },
+    "/api/runs/{run_id}/dashboard": {
+      "get": {
+        "operationId": "dashboard_api_runs__run_id__dashboard_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Dashboard"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Dashboard"
+      }
+    },
+    "/api/runs/{run_id}/events": {
+      "get": {
+        "description": "Server-sent events: replays from Last-Event-ID / ?after, then tails live; closes when the run ends.",
+        "operationId": "events_api_runs__run_id__events_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "after",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "After",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Events"
+      }
+    },
+    "/api/runs/{run_id}/report": {
+      "get": {
+        "operationId": "report_api_runs__run_id__report_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Report"
+      }
+    }
+  }
+}

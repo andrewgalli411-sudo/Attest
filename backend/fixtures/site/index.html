@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Fixture: known violations</title>
+<style>
+ body{font-family:sans-serif} .low{color:#999;background:#fff}
+ .nofocus:focus{outline:none}
+</style></head>
+<body>
+<main>
+  <h1>Fixture page</h1>
+  <p class="low">Low-contrast text (1.4.3 fail).</p>
+  <img src="x.png">
+  <div role="button" onclick="void 0">Click div (not keyboard reachable, 2.1.1 fail)</div>
+  <a class="nofocus" href="#a">Focus outline removed (2.4.7 fail)</a>
+  <form><input type="text" placeholder="Name"><button type="submit">Send</button></form>
+  <a href="good.html">Good page</a>
+</main></body></html>

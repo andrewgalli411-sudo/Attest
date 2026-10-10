@@ -1,0 +1,13 @@
+{
+  "projects": {
+    "web": {
+      "repo_path": "/repos/web",
+      "dev_command": "pnpm dev --port {port}",
+      "check_commands": ["pnpm build"],
+      "pages": [{"path": "/", "label": "home"}, {"path": "/dashboard", "label": "dashboard"}],
+      "auth_cookies": [{"name": "session", "value": "<dev-seed-session>"}],
+      "base_branch": "main",
+      "allow_push": false
+    }
+  }
+}

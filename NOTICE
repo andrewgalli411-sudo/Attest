@@ -1,0 +1,6 @@
+Third-party software included in this repository
+
+axe-core 4.14.0  (backend/vendor/axe.min.js)
+  Copyright (c) Deque Systems, Inc. Licensed under the Mozilla Public License 2.0.
+  Source and license: https://github.com/dequelabs/axe-core
+  The file is included unmodified.

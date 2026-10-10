@@ -1,0 +1,6 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><title>m</title></head><body><main><h1>m</h1>
+<button id="openbtn" aria-haspopup="dialog">Open</button>
+<div id="dlg" role="dialog" aria-modal="true" aria-label="D" hidden><button id="x">Close</button><button id="y">Other</button></div>
+<script>const d=document.getElementById("dlg"),x=document.getElementById("x"),y=document.getElementById("y"),o=document.getElementById("openbtn");o.onclick=()=>{d.hidden=false;x.focus()};
+const close=()=>{d.hidden=true;o.focus()};x.onclick=close;
+d.addEventListener('keydown',e=>{if(e.key==='Escape')close();if(e.key==='Tab'){const f=[x,y];const i=f.indexOf(document.activeElement);e.preventDefault();f[(i+(e.shiftKey?f.length-1:1))%f.length].focus();}});</script></main></body></html>

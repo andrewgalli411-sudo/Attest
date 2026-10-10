@@ -1,0 +1,5 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><title>modal</title></head><body><main><h1>m</h1>
+<button id="a">a</button><button id="b">b</button><button id="out">outside</button>
+<script>document.addEventListener('keydown',e=>{
+ if(e.key==='Escape'){document.getElementById('out').focus();return}
+ if(e.key==='Tab'&&!e.shiftKey){const act=document.activeElement.id;if(act==='a'||act==='b'||act===''){e.preventDefault();document.getElementById(act==='a'?'b':'a').focus();}}});</script></main></body></html>

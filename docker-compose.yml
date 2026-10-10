@@ -1,0 +1,41 @@
+# Production-shaped stack. Secrets come from the environment / an .env file next to this file, never from git.
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: auditor
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: auditor
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck: {test: ["CMD-SHELL", "pg_isready -U auditor"], interval: 10s, retries: 5}
+    restart: unless-stopped
+
+  api:
+    build: {context: ./backend}
+    depends_on: {db: {condition: service_healthy}}
+    environment:
+      DATABASE_URL: postgresql+psycopg://auditor:${POSTGRES_PASSWORD}@db:5432/auditor
+      API_TOKEN: ${API_TOKEN:?set API_TOKEN (any long random string)}
+      ALLOWED_HOSTS: '["api","localhost","127.0.0.1"]'
+      PROJECTS_FILE: /config/projects.json
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      DEMO_ENABLED: ${DEMO_ENABLED:-false}
+      SEND_SCREENSHOTS_TO_MODEL: "false"
+    volumes:
+      - evidence:/data
+      - ./deploy/projects.json:/config/projects.json:ro
+      - ${REPOS_DIR:?set REPOS_DIR}:/repos      # the checkouts the projects refer to (writable: fixes are committed on branches)
+    restart: unless-stopped
+    # No `ports:` on purpose: the API is reachable only from other services on this compose network (the web app).
+
+  web:
+    build: {context: ./frontend}
+    depends_on: [api]
+    environment:
+      API_INTERNAL_URL: http://api:8000
+      AUDITOR_API_TOKEN: ${API_TOKEN}
+      UI_BASIC_AUTH: ${UI_BASIC_AUTH:-}   # user:password. Prefer SSO at your reverse proxy for anything shared.
+    ports: ["3000:3000"]
+    restart: unless-stopped
+
+volumes: {pgdata: {}, evidence: {}}

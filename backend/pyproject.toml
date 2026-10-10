@@ -1,0 +1,59 @@
+[project]
+name = "auditor"
+version = "0.1.0"
+description = "Agentic WCAG 2.1 AA auditor and VPAT 2.5 ACR generator (automated first pass; requires expert review)"
+requires-python = ">=3.12"
+dependencies = [
+  "fastapi>=0.115",
+  "uvicorn[standard]>=0.32",
+  "sqlalchemy>=2.0",
+  "alembic>=1.13",
+  "pydantic>=2.9",
+  "pydantic-settings>=2.6",
+  "playwright>=1.48",
+  "anthropic>=0.40",
+  "jinja2>=3.1",
+  "python-docx>=1.1",
+  "aiosqlite>=0.20",
+  "psycopg[binary]>=3.2",
+  "pyjwt>=2.15.1",
+  "cryptography>=50.0.2",
+  "httpx>=0.28.1",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "pytest-asyncio>=0.24",
+    "httpx>=0.27",
+    "ruff>=0.7",
+    "pytest-timeout>=2.4.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/auditor"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+timeout = 120
+timeout_method = "thread"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+exclude = ["scripts"]
+
+[tool.ruff.lint.per-file-ignores]
+# Deliberate: pipeline stages must record failures, never crash the run.
+"src/auditor/pipeline/**" = ["BLE001", "S110", "S112", "UP031"]
+# Tests unpack tuples they only partly use and tear fixtures down best-effort.
+"tests/**" = ["RUF059", "RUF015", "PLW1510", "ASYNC221", "ASYNC210", "S110"]
+# Literal HTML assembled from adjacent string pieces.
+"src/auditor/report/**" = ["ISC004"]
+
+[tool.ruff.lint.flake8-bugbear]
+extend-immutable-calls = ["fastapi.Depends", "fastapi.Query"]
