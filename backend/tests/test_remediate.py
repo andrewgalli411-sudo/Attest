@@ -261,3 +261,32 @@ async def test_if_every_page_fails_the_run_fails_loudly_instead_of_reporting_not
     with sf() as db:
         assert db.get(AuditRun, rid).status == RunStatus.failed  # NOT "complete with 0 issues"
     assert git(repo, "rev-parse", "HEAD") == base_sha and git(repo, "status", "--porcelain") == ""
+
+
+async def test_fixes_in_two_pr_tiers_on_one_page_score_once_and_honestly(sf, tmp_path, demo_repo):
+    """Regression: a model that splits one page's fixes across PR1 and PR2 made the run write two 'after' scores for the
+    same page and die on the unique constraint (found by the live-model injection test; the stand-in used one tier)."""
+    import json
+
+    from auditor.devtools.scripted_client import ScriptedClient as _Scripted
+
+    class TwoTierClient(_Scripted):
+        def _triage(self, kw):
+            r = super()._triage(kw)
+            obj = json.loads(r.content[0].text)
+            if obj["reason_code"] == "missing_label":
+                obj["confidence"] = 0.85  # passes the auto-fix gate (0.8) but not the PR1 bar (0.9)
+                r.content[0].text = json.dumps(obj)
+            return r
+
+    repo, base_sha = demo_repo
+    rid, summary, _ = await remediate(sf, tmp_path, repo, client=TwoTierClient())
+    assert sorted(summary["branches"]) == ["PR1", "PR2"], summary["branches"]
+    assert summary["proved"] == 2 and summary["regressions"] == 0, summary["headline"]
+    with sf() as db:
+        rows = db.scalars(select(PageScore).where(PageScore.run_id == rid, PageScore.phase == "after")).all()
+        assert len(rows) == 1  # one 'after' row per page, not one per tier
+        assert rows[0].breakdown["lower_bound"] is True and rows[0].breakdown["measured_tiers"] == ["PR1", "PR2"]
+        base = db.scalar(select(PageScore).where(PageScore.run_id == rid, PageScore.phase == "baseline"))
+        assert rows[0].score > base.score  # the reported improvement is real, and never overstated
+    assert git(repo, "rev-parse", "HEAD") == base_sha and git(repo, "status", "--porcelain") == ""

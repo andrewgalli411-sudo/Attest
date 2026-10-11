@@ -32,6 +32,15 @@ class FixSummary:
     regression: dict | None = None  # {regressions_count, verdict}
 
 
+def _clean(text: str, what: str) -> str:
+    """Text that came from the audited page, the repo, or the model is untrusted: it may quote a phrase the tool
+    must never publish (a hostile page, or a legitimate "Compliance" menu item in the diff context). Withhold that
+    part and say so; never fail the run and never pass the phrase on."""
+    if contains_banned_claim(text):
+        return f"[{what} withheld: it contained wording this tool does not publish]"
+    return text
+
+
 def _proof_line(p: dict | None) -> str:
     if not p:
         return "Re-test: not yet run."
@@ -50,30 +59,32 @@ def build_pr(tier: str, run_id: str, fixes: list[FixSummary]) -> tuple[str, str]
     title = TIER_TITLES[tier]
     parts = [f"Automated accessibility fixes from audit run `{run_id}` ({len(fixes)} change(s)).", ""]
     for f in fixes:
+        diff = f.diff.strip()
+        if contains_banned_claim(diff):
+            diff = "(diff not shown here because it quotes wording this tool does not publish; review it on the branch)"
         parts += [
-            f"### {f.rule_id} - WCAG {', '.join(f.sc_ids) or 'n/a'} ({f.severity})",
-            f"Page: {f.page_url}", "",
-            f"**Impact:** {f.impact_text}", f"**Change:** {f.explanation}", "",
+            _clean(f"### {f.rule_id} - WCAG {', '.join(f.sc_ids) or 'n/a'} ({f.severity})", "heading"),
+            f"Page: {_clean(f.page_url, 'page address')}", "",
+            f"**Impact:** {_clean(f.impact_text, 'impact text')}",
+            f"**Change:** {_clean(f.explanation, 'change description')}", "",
             _proof_line(f.proof), _reg_line(f.regression), "",
-            "```diff", f.diff.strip(), "```", "",
+            "```diff", diff, "```", "",
         ]
     parts += ["---", STANDING_LINE]
     body = "\n".join(parts)
-    for t in (title, body):
-        if contains_banned_claim(t):
-            raise ValueError("generated PR text contains a banned claim")
+    assert not contains_banned_claim(title) and not contains_banned_claim(body), "unsanitised text reached a pull request"
     return title, body
 
 
 def build_work_order(f: FixSummary, reason: str) -> tuple[str, str]:
     title = f"a11y work order: {f.rule_id} on {f.page_url}"
     body = "\n".join([
-        f"Automated finding that needs human judgment (reason: {reason}).", "",
-        f"- Rule: `{f.rule_id}`  WCAG: {', '.join(f.sc_ids) or 'n/a'}  Severity: {f.severity}",
-        f"- Page: {f.page_url}", "", f"**Impact:** {f.impact_text or 'See evidence.'}", "",
+        f"Automated finding that needs human judgment (reason: {_clean(reason, 'reason')}).", "",
+        _clean(f"- Rule: `{f.rule_id}`  WCAG: {', '.join(f.sc_ids) or 'n/a'}  Severity: {f.severity}", "rule line"),
+        f"- Page: {_clean(f.page_url, 'page address')}", "",
+        f"**Impact:** {_clean(f.impact_text, 'impact text') if f.impact_text else 'See evidence.'}", "",
         "No code change was proposed for this item.", "", "---", WORK_ORDER_LINE,
     ])
-    for t in (title, body):
-        if contains_banned_claim(t):
-            raise ValueError("generated issue text contains a banned claim")
+    title = _clean(title, "title")
+    assert not contains_banned_claim(title) and not contains_banned_claim(body), "unsanitised text reached an issue"
     return title, body

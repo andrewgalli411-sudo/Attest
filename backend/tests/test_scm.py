@@ -159,11 +159,13 @@ def test_pr_body_is_honest_when_proof_is_missing_or_negative():
     assert "could not be re-tested" in body and "now passes" not in body
 
 
-def test_banned_text_in_any_field_blocks_pr_and_work_order():
-    with pytest.raises(ValueError):
-        build_pr("PR1", "r", [fix(explanation="Makes the form compliant")])
-    with pytest.raises(ValueError):
-        build_work_order(fix(impact_text="This is certified accessible"), "contrast")
+def test_banned_text_in_any_field_is_withheld_from_pr_and_work_order():
+    from auditor.disclaimers import contains_banned_claim
+
+    _, body = build_pr("PR1", "r", [fix(explanation="Makes the form compliant")])
+    assert "compliant" not in body and "change description withheld" in body
+    t, body = build_work_order(fix(impact_text="This is certified accessible"), "contrast")
+    assert "certified" not in body and not contains_banned_claim(t) and "impact text withheld" in body
     t, b = build_work_order(fix(), "contrast")
     assert "No code change was proposed" in b and "work order" in t
     assert json.dumps(b)  # serialisable

@@ -23,9 +23,9 @@ text, and the report. Fixed UI wording is reviewed by hand.**
   instance count, because nothing distinguishes them.
 - **Volume:** at most `MAX_FINDINGS_PER_PAGE` (default 200) findings per page are itemised with screenshots, most
   severe first. The rest are still counted and still lower the page score; the summary says how many were not itemised.
-- **Not yet validated:** quality of the model's triage and fixes on real codebases. The test suite uses a
-  deterministic stand-in because no API key was available during development. Run it on a non-critical repo
-  first and review every pull request.
+- **Not yet validated:** quality of the model's triage and fixes on real codebases. The live model has been run
+  only on the bundled demo app (3 findings); the regular test suite uses a deterministic stand-in, and the
+  opt-in live tests need `A11Y_LIVE=1`. Run it on a non-critical repo first and review every pull request.
 
 ## Deploy
 ```

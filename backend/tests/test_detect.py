@@ -104,5 +104,11 @@ async def test_persist_writes_finding_locator_evidence(sf, tmp_path, demo_server
 
 
 def test_no_dev_server_left_behind():
-    out = subprocess.run(["pgrep", "-f", "vite"], capture_output=True, text=True).stdout.split()
-    assert out == [], f"leaked dev server processes: {out}"
+    """Only dev servers this tool starts count (strict port, in a temp checkout), not whatever else runs on the machine."""
+    import os
+    import tempfile
+
+    tmp = {tempfile.gettempdir(), os.path.realpath(tempfile.gettempdir()), "/tmp", "/private/tmp"}
+    lines = subprocess.run(["pgrep", "-fl", "vite"], capture_output=True, text=True).stdout.splitlines()
+    leaked = [ln for ln in lines if "--strictPort" in ln and any(t in ln for t in tmp)]
+    assert leaked == [], f"leaked dev server processes: {leaked}"

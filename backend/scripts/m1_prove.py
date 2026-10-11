@@ -57,7 +57,13 @@ def main() -> int:
         auth, checks, pages = SEED_AUTH, a.check or ["pnpm build"], [{"path": p, "label": p} for p in (a.page or ["/"])]
     elif a.repo:
         repo = a.repo.resolve()
-        auth = {"cookies": [dict(zip(("name", "value"), c.split("=", 1), strict=True)) for c in a.auth_cookie]} or None
+        if not (repo / ".git").exists():
+            ap.error(f"--repo must be a git checkout (no .git found in {repo})")
+        bad = [c for c in a.auth_cookie if "=" not in c or c.startswith("=")]
+        if bad:
+            ap.error(f"--auth-cookie must look like NAME=VALUE, got: {bad[0]!r}")
+        cookies = [dict(zip(("name", "value"), c.split("=", 1), strict=True)) for c in a.auth_cookie]
+        auth = {"cookies": cookies} if cookies else None
         checks, pages = a.check or [], [{"path": p, "label": p} for p in (a.page or ["/"])]
     else:
         ap.error("give --demo or --repo")
@@ -71,6 +77,8 @@ def main() -> int:
         client = ScriptedClient()
         print("NOTE: using the scripted stand-in, not a language model (no ANTHROPIC_API_KEY).", file=sys.stderr)
 
+    for stale in (out / "m1.db", out / "m1.db-wal", out / "m1.db-shm"):
+        stale.unlink(missing_ok=True)  # a database from an older version has a different schema
     engine = create_engine(f"sqlite:///{out / 'm1.db'}", connect_args={"check_same_thread": False})
     Base.metadata.create_all(engine)
     sf = sessionmaker(engine, expire_on_commit=False)

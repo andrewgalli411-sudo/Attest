@@ -374,9 +374,9 @@ async def _fix_one(sf, store, bus, client, cfg, provider, run_id, base_sha, fid,
 
 # ------------------------------------------------------------------------------------------ re-prove
 async def _reprove_tiers(sf, store, bus, browser, cfg, provider, run_id, base_sha, pages, tiers) -> dict:
-    after_scores: dict[str, int] = {}
+    measured: dict[str, list[tuple[int, dict, str]]] = {}  # page -> (score, breakdown, tier) per tier measured
     pg_by_id = {p["id"]: p for p in pages}
-    for t in tiers.values():
+    for tier_name, t in tiers.items():
         with sf() as db:
             items = []
             for fid in t["findings"]:
@@ -412,8 +412,8 @@ async def _reprove_tiers(sf, store, bus, browser, cfg, provider, run_id, base_sh
                         browser, url, stored_fp=it["fp"], rule_id=it["rule"], ignore_attrs=it["ignore"],
                         runs=cfg.reprove_runs, **kw)
                 snap_after = await snapshot_state(browser, url, with_probes=cfg.with_probes, **kw)
-                score = await _score_after(sf, browser, url, run_id, pg, cfg)
-                after_scores[pid] = score
+                score, breakdown = await _score_after(browser, url, pg, cfg)
+                measured.setdefault(pid, []).append((score, breakdown, tier_name))
                 for it in its:
                     out = decide(control[it["fid"]], after[it["fid"]])
                     _record_reprove(sf, store, bus, run_id, pid, it, out, url)
@@ -421,17 +421,31 @@ async def _reprove_tiers(sf, store, bus, browser, cfg, provider, run_id, base_sh
                                      fixed_keys=[weak_key(it["rule"], it["fp"]) for it in its])
                 _record_regression(sf, store, bus, run_id, pid, its, rep)
         provider.restore(cfg.base_branch)
-    return after_scores
+    return _record_after_scores(sf, run_id, measured)
 
 
-async def _score_after(sf, browser, url, run_id, pg, cfg) -> int:
+def _record_after_scores(sf, run_id, measured) -> dict[str, int]:
+    """One 'after' row per page. Each tier is built and measured on its own branch, so when a page has fixes in
+    more than one tier no single build contains them all. A fix never lowers a score (tested property), so the best
+    single-tier score is a safe lower bound for the combined result, and the row says so."""
+    out: dict[str, int] = {}
+    with sf() as db:
+        for pid, entries in measured.items():
+            score, breakdown, tier = max(entries, key=lambda e: e[0])
+            if len(entries) > 1:
+                breakdown = {**breakdown, "lower_bound": True, "measured_tiers": sorted(e[2] for e in entries),
+                             "note": f"tiers were measured separately; this is the best single tier ({tier}), so the "
+                                     "combined score is at least this"}
+            db.add(PageScore(run_id=run_id, page_state_id=pid, phase="after", score=score, breakdown=breakdown))
+            out[pid] = score
+        db.commit()
+    return out
+
+
+async def _score_after(browser, url, pg, cfg) -> tuple[int, dict]:
     found = await detect_state(browser, rebase_url(pg["url"], url), steps=pg["steps"], auth=cfg.auth,
                                with_probes=cfg.with_probes, with_evidence=False)
-    score, breakdown = _score_findings(found)
-    with sf() as db:
-        db.add(PageScore(run_id=run_id, page_state_id=pg["id"], phase="after", score=score, breakdown=breakdown))
-        db.commit()
-    return score
+    return _score_findings(found)
 
 
 def _score_findings(found: list[RawFinding]) -> tuple[int, dict]:
