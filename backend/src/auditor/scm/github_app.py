@@ -9,7 +9,6 @@ minted from the App's private key and valid for about an hour.
 from __future__ import annotations
 
 import base64
-import os
 import subprocess
 import time
 from pathlib import Path
@@ -18,6 +17,7 @@ import httpx
 import jwt
 
 from ..disclaimers import contains_banned_claim
+from ..gitsafe import git_cmd, git_env
 from .base import PushNotAllowed, RepoError
 from .local_git import LocalGitProvider
 
@@ -72,7 +72,7 @@ class GitHubAppProvider(LocalGitProvider):
 
     def push(self, branch: str) -> None:
         self._require_push("push")
-        env = dict(os.environ)
+        env = git_env()
         token = ""
         if self.push_url.startswith("https://"):
             # Token goes to git via the environment as an auth header: never on the command line (visible in
@@ -82,7 +82,7 @@ class GitHubAppProvider(LocalGitProvider):
             env.update({"GIT_CONFIG_COUNT": "1", "GIT_TERMINAL_PROMPT": "0",
                         "GIT_CONFIG_KEY_0": "http.https://github.com/.extraheader",
                         "GIT_CONFIG_VALUE_0": f"AUTHORIZATION: basic {basic}"})
-        r = subprocess.run(["git", "push", self.push_url, f"{branch}:refs/heads/{branch}"], cwd=self.path, env=env,
+        r = subprocess.run(git_cmd("push", self.push_url, f"{branch}:refs/heads/{branch}"), cwd=self.path, env=env,
                            capture_output=True, text=True, check=False)
         if r.returncode != 0:
             err = r.stderr.replace(token, "***") if token else r.stderr

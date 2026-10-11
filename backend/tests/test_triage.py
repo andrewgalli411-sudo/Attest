@@ -160,7 +160,11 @@ async def test_run_triage_survives_api_errors(sf, tmp_path):
     fid, store = make_finding(sf, tmp_path)
     await run_triage(sf, store, boom, "m", AuditRun.__name__ and _run_id(sf))
     with sf() as db:
-        assert db.get(Finding, fid).status == FindingStatus.caught  # untouched, retriable
+        f = db.get(Finding, fid)
+        assert f.status == FindingStatus.needs_human, "a model outage must not leave findings stuck in 'caught'"
+        v = db.scalar(select(TriageVerdict).where(TriageVerdict.finding_id == fid))
+        assert not v.valid and "model error RuntimeError" in " ".join(v.gate_notes)
+        assert f.impact_text is None
 
 
 def _run_id(sf):
@@ -172,3 +176,15 @@ def test_gate_direct_never_trusts_unknown_enum():
     g = apply_gate(rule_id="label", model_out={"tier": "auto_fix", "reason_code": "weird"},
                    evidence_ids=set(), baseline_stable=True, source_unique=True)
     assert not g.valid and g.tier == "needs_human"
+
+
+async def test_an_exhausted_model_budget_hands_remaining_findings_to_a_person(sf, tmp_path):
+    from auditor.budget import BudgetedClient
+
+    client = BudgetedClient(FakeTriage("good"), budget=0)  # nothing may be spent
+    fid, store = make_finding(sf, tmp_path)
+    v = await triage_one(sf, store, client, "claude-opus-5-5", fid)
+    assert not v.valid and v.tier == Tier.needs_human and "budget" in " ".join(v.gate_notes)
+    assert client.calls == 0 and client._inner.calls == []  # not a single call reached the model
+    with sf() as db:
+        assert db.get(Finding, fid).status == FindingStatus.needs_human

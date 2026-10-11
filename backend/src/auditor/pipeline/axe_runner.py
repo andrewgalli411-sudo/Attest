@@ -21,7 +21,17 @@ def tags_to_sc(tags: list[str]) -> list[str]:
 
 
 async def run_axe(page: Page) -> dict:
-    await page.add_script_tag(content=AXE_PATH.read_text())
+    # axe aggregates results across frames only if it is loaded in each of them. Without this, everything inside an
+    # iframe is silently missing from the audit.
+    source = AXE_PATH.read_text()
+    await page.add_script_tag(content=source)
+    for frame in page.frames:
+        if frame is page.main_frame:
+            continue
+        try:
+            await frame.add_script_tag(content=source)
+        except Exception:
+            continue
     raw = await page.evaluate(
         "tags => axe.run(document, {runOnly: {type: 'tag', values: tags}, resultTypes: "
         "['violations','incomplete','passes']})",

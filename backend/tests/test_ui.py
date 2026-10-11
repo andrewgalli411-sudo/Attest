@@ -179,3 +179,59 @@ def test_the_proxy_refuses_path_tricks_and_reports_a_dead_backend(tmp_path):
 def web_cm2(tmp_path):
     return dev_server(FRONTEND, "pnpm exec next dev --port {port} --hostname 127.0.0.1", startup_timeout=120,
                       env={"API_INTERNAL_URL": f"http://127.0.0.1:{free_port()}", "AUDITOR_API_TOKEN": ""})
+
+
+# ---------------------------------------------------------------- the production build, with its CSP, in a real browser
+@pytest.fixture(scope="module")
+def prod_build():
+    """`next build` once per module into its own directory (so it cannot disturb a dev server)."""
+    import os
+    import subprocess
+
+    env = {**os.environ, "NEXT_DIST_DIR": ".next-prod", "NODE_ENV": "production"}
+    r = subprocess.run(["pnpm", "exec", "next", "build"], cwd=FRONTEND, env=env, capture_output=True, text=True, timeout=300)
+    assert r.returncode == 0, r.stdout[-1500:] + r.stderr[-1500:]
+    return env
+
+
+async def test_the_production_build_works_end_to_end_with_its_csp_and_a_token(tmp_path, prod_build):
+    token = "tok-" + secrets.token_hex(12)
+    api_port = free_port()
+    api_cmd = f"{sys.executable} -m uvicorn auditor.main:create_app --factory --host 127.0.0.1 --port {api_port}"
+    api_env = {"DATABASE_URL": f"sqlite:///{tmp_path}/p.db", "EVIDENCE_DIR": str(tmp_path / "ev"), "API_TOKEN": token}
+    web_env = {"NEXT_DIST_DIR": ".next-prod", "NODE_ENV": "production", "API_INTERNAL_URL": f"http://127.0.0.1:{api_port}",
+               "AUDITOR_API_TOKEN": token}
+    with dev_server(tmp_path, api_cmd, port=api_port, env=api_env), dev_server(
+            FRONTEND, "pnpm exec next start --port {port} --hostname 127.0.0.1", startup_timeout=120, env=web_env) as web:
+        head = httpx.get(web + "/", timeout=60)
+        h = head.headers
+        csp = h["content-security-policy"]
+        assert "default-src 'self'" in csp and "frame-ancestors 'none'" in csp and "object-src 'none'" in csp
+        assert h["x-frame-options"] == "DENY" and h["x-content-type-options"] == "nosniff"
+        assert "x-powered-by" not in h and h["referrer-policy"] == "no-referrer"
+
+        async with async_playwright() as pw:
+            browser = await pw.chromium.launch()
+            page = await browser.new_page(viewport={"width": 1280, "height": 900})
+            violations, errors = [], []
+            await page.add_init_script("document.addEventListener('securitypolicyviolation', e => "
+                                       "(window.__csp = window.__csp || []).push(e.violatedDirective + ' ' + e.blockedURI));")
+            page.on("pageerror", lambda e: errors.append(str(e)))
+            page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
+            await page.goto(web + "/", wait_until="networkidle")
+            assert await axe_violations(page) == []
+            await page.get_by_role("button", name="Run on the bundled demo app").click()
+            await page.wait_for_url("**/runs/*")
+            await expect(page.get_by_text("fixed in PRs (proved)")).to_be_visible(timeout=240_000)  # live SSE through the proxy, in prod
+            assert await axe_violations(page) == []
+            await page.get_by_role("link", name="label", exact=True).first.click()
+            await expect(page.get_by_role("heading", name="5. Proof on the patched build")).to_be_visible(timeout=30_000)
+            await page.wait_for_function("[...document.images].length >= 4 && [...document.images].every(i => i.complete)")
+            sizes = await page.evaluate("[...document.images].map(i => [i.naturalWidth, i.naturalHeight])")
+            assert all(w > 0 and h > 0 for w, h in sizes), "CSP must not block the evidence images"
+            assert await axe_violations(page) == []
+            violations = await page.evaluate("window.__csp || []")
+            assert violations == [], f"CSP violations in production: {violations}"
+            assert not [e for e in errors if "favicon" not in e], errors
+            assert token not in await page.content()
+            await browser.close()

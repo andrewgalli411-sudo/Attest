@@ -60,10 +60,10 @@ def apply_gate(
         return human("not_automatable", f"rule {rule_id} always requires human judgment")
     if rule_id not in SAFE_RULES:
         return human("not_automatable", f"rule {rule_id} is not on the safe-fix allowlist")
+    if not source_unique:  # checked first so the person is told the real reason (e.g. "inside an iframe")
+        return human("ambiguous_source", f"no unique source location: {source_reason}")
     if not baseline_stable:
         return human("unstable", "finding was not present in both baseline passes")
-    if not source_unique:
-        return human("ambiguous_source", f"no unique source location: {source_reason}")
     conf = float(model_out.get("confidence", 0))
     if conf < CONFIDENCE_FLOOR:
         return human(reason, f"confidence {conf:.2f} below {CONFIDENCE_FLOOR}")

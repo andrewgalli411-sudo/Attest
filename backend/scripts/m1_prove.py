@@ -65,7 +65,7 @@ def main() -> int:
     client_kind = a.client or ("anthropic" if (os.environ.get("ANTHROPIC_API_KEY") or settings.anthropic_api_key) else "scripted")
     if client_kind == "anthropic":
         from anthropic import AsyncAnthropic
-        client = AsyncAnthropic()
+        client = AsyncAnthropic(api_key=settings.anthropic_api_key or os.environ.get("ANTHROPIC_API_KEY"), max_retries=4, timeout=120.0)
     else:
         from auditor.devtools.scripted_client import ScriptedClient
         client = ScriptedClient()

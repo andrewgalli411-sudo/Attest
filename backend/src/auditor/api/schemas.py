@@ -1,6 +1,31 @@
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+import re
+
+from pydantic import BaseModel, Field, field_validator
+
+_PATH = re.compile(r"^/(?!/)[A-Za-z0-9._~!$&'()*+,;=:@%/?#\[\]-]{0,499}$")  # one leading '/', no scheme, no spaces/controls
+
+
+class PageSpec(BaseModel):
+    """A page to audit, as a path on the audited app. Never a URL: the host always comes from the server."""
+
+    path: str = Field(max_length=500)
+    label: str | None = Field(None, max_length=100)
+
+    @field_validator("path")
+    @classmethod
+    def _path_only(cls, v: str) -> str:
+        if not _PATH.match(v) or "\\" in v or ".." in v.split("?")[0].split("/"):
+            raise ValueError("path must start with a single '/', contain no scheme, host, backslash or '..'")
+        return v
+
+    @field_validator("label")
+    @classmethod
+    def _printable(cls, v: str | None) -> str | None:
+        if v is not None and not v.isprintable():
+            raise ValueError("label must be printable text")
+        return v
 
 
 class StartRun(BaseModel):
@@ -8,8 +33,8 @@ class StartRun(BaseModel):
 
     project: str | None = Field(None, description="name of an operator-defined project")
     demo: bool = False
-    pages: list[dict] | None = Field(None, description="override the project's pages: [{path, label}]")
-    only_rules: list[str] | None = None
+    pages: list[PageSpec] | None = Field(None, max_length=25, description="override the project's pages: [{path, label}]")
+    only_rules: list[str] | None = Field(None, max_length=50)
     max_fixes: int | None = Field(None, ge=1, le=100)
     with_probes: bool = False
     publish: bool = Field(False, description="push branches and open PRs/issues; honoured only if the project allows it")
@@ -19,6 +44,18 @@ class StartRun(BaseModel):
     check_commands: list[str] = Field(default_factory=list)
     auth_cookies: list[dict] = Field(default_factory=list)
     base_branch: str = "main"
+
+
+class StatusOut(BaseModel):
+    active_runs: int
+    event_subscribers: int
+    max_concurrent_runs: int
+
+
+class ErrorOut(BaseModel):
+    """Shape of every non-validation error: {"detail": "human-readable reason"}."""
+
+    detail: str
 
 
 class ProjectInfo(BaseModel):

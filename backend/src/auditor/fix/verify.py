@@ -13,6 +13,7 @@ import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from ..gitsafe import git_cmd, git_env, is_plain_path
 from .safety import UnsafeEdit, check_edit_shape
 
 MAX_EDITS = 5
@@ -34,6 +35,8 @@ class ApplyResult:
 
 def _safe_path(repo: Path, rel: str) -> Path:
     p = (repo / rel).resolve()
+    if not is_plain_path(repo, repo / rel) and p.exists():
+        raise EditError(f"edit goes through a symbolic link: {rel!r}")
     if repo.resolve() not in p.parents:
         raise EditError(f"edit targets a path outside the repo: {rel!r}")
     if ".git" in p.relative_to(repo.resolve()).parts or "node_modules" in p.parts:
@@ -95,7 +98,8 @@ def rollback(repo: Path, originals: dict[str, str]) -> None:
 
 
 def git_diff(repo: Path) -> str:
-    return subprocess.run(["git", "diff", "--no-color"], cwd=repo, check=True, capture_output=True, text=True).stdout
+    return subprocess.run(git_cmd("diff", "--no-color", "--no-ext-diff"), cwd=repo, check=True, capture_output=True,
+                          text=True, env=git_env()).stdout
 
 
 def run_checks(repo: Path, commands: list[str], timeout: int = 300) -> list[dict]:
@@ -127,7 +131,8 @@ def apply_and_verify(repo: Path, edits: list[dict], allowed_files: set[str], che
     except EditError as e:
         return ApplyResult(False, error=str(e))
     diff = git_diff(repo)
-    ws = subprocess.run(["git", "diff", "--check"], cwd=repo, capture_output=True, text=True, check=False)
+    ws = subprocess.run(git_cmd("diff", "--check", "--no-ext-diff"), cwd=repo, capture_output=True, text=True,
+                        check=False, env=git_env())
     checks = [{"cmd": "git diff --check", "ok": ws.returncode == 0, "rc": ws.returncode, "tail": ws.stdout[-400:]}]
     if ws.returncode == 0:
         checks += run_checks(repo, check_commands, check_timeout)

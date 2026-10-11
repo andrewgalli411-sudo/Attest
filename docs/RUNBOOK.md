@@ -15,8 +15,14 @@ text, and the report. Fixed UI wording is reviewed by hand.**
 - Proves a fix only if: an unpatched control still fails, the *same element* is re-located on the patched
   build, and the rule passes there in every run. Otherwise it reports "fix did not work" or "could not be
   re-tested", never a pass.
-- **Not covered:** native apps, PDFs, screen-reader automation, elements inside iframes, production
-  builds (proofs run against your dev server), and most WCAG criteria that need human judgment.
+- **Not covered:** native apps, PDFs, screen-reader automation, production builds (proofs run against your dev
+  server), and most WCAG criteria that need human judgment.
+- **Iframes and shadow roots:** problems inside them are *reported* (axe runs in every frame), but the element
+  cannot be re-located, so they are never auto-fixed: they become work orders that say why.
+- **Identical elements** (for example 12 unlabeled inputs rendered from one loop) become one finding labelled with the
+  instance count, because nothing distinguishes them.
+- **Volume:** at most `MAX_FINDINGS_PER_PAGE` (default 200) findings per page are itemised with screenshots, most
+  severe first. The rest are still counted and still lower the page score; the summary says how many were not itemised.
 - **Not yet validated:** quality of the model's triage and fixes on real codebases. The test suite uses a
   deterministic stand-in because no API key was available during development. Run it on a non-critical repo
   first and review every pull request.
@@ -44,14 +50,27 @@ to fix small things on first build. Without Docker: `uv run alembic upgrade head
   with no policy cannot be auto-fixed. Edits must also stay in one file, pass your build, and are merged by a person.
 - **Nothing is published by default.** Pushing branches and opening PRs/issues requires the project to set
   `allow_push` *and* the run to request `publish`. Published text is filtered for compliance claims.
+- **Page inputs are validated.** A page is a *path* (`/dashboard`), never a URL: a path that could change the host
+  (`@evil.example/`, `//evil.example`, `http://...`, `..`, backslashes) is rejected, and the run re-checks that every
+  navigation stays on the audited app's origin.
+- **Web layer:** request bodies are capped (`MAX_REQUEST_BYTES`, 411/413), every response carries security headers,
+  the report page has a strict CSP so text from audited pages can never execute, and the production web app sends a
+  CSP of its own. Each request gets a validated request id (logged, echoed in `X-Request-ID`).
+- **Untrusted repositories:** symbolic links are never followed (reading or writing), and git runs with hooks,
+  `fsmonitor` and external diff drivers disabled. **Only point this at repositories you trust**: it already runs their
+  dev server and build commands, and git `.gitattributes` clean/smudge filters are not neutralised.
+- **Several API workers** may share one database: runs carry a heartbeat, a restarting worker only fails runs whose
+  heartbeat is stale, and the one-run limit is decided from the database with a deterministic tie-break. A run can only be
+  cancelled through the worker that owns it.
 - Your working tree must be clean to start; fixes are committed on `a11y/...` branches only; the repo is
   restored to its branch afterwards, including after a cancel, crash, or timeout.
 
 ## Privacy: what is sent to the model
 Page HTML excerpts and source-code excerpts are sent to the Anthropic API for triage and fix writing, after
 redaction of emails, phone/number runs, tokens, API keys, private keys, `value=` attributes and `password:`-style
-assignments. **A bare secret with no recognisable shape and no key name (for example the word `hunter2` alone) is
-not detected.** Screenshots are never sent unless `SEND_SCREENSHOTS_TO_MODEL=true`. If your data policy
+assignments, plus an entropy check for unlabeled tokens (about 93% of random 20-31 character tokens, all 32+ character
+ones). **A human-chosen password with no key name (for example the word `hunter2` alone) is not detected.** Redaction
+is linear-time and capped, so a hostile page cannot stall the server. Screenshots are never sent unless `SEND_SCREENSHOTS_TO_MODEL=true`. If your data policy
 forbids sending page or source content to a third party, do not configure an API key.
 
 ## Operations
@@ -62,10 +81,13 @@ forbids sending page or source content to a third party, do not configure an API
 - **Retention:** `python -m auditor.purge --days 30 [--dry-run]` deletes finished runs and every file they own.
   Evidence contains screenshots/HTML of audited pages: schedule this, and treat the evidence volume as sensitive.
 - **Backups:** back up the Postgres database and the evidence volume together.
-- **Health:** `GET /api/health` (no auth). Logs go to stdout.
+- **Model spend:** `MODEL_TOKEN_BUDGET` (default 1,500,000 tokens) is a hard ceiling per run; when spent, remaining
+  findings go to a person with that reason and the run still completes. A model error on one finding affects only
+  that finding. If the primary model declines a request, the API retries it on a fallback model (`REFUSAL_FALLBACK`).
+- **Health:** `GET /api/health` (no auth) and `GET /api/status` (auth: active runs, event subscribers). Logs go to stdout.
 - **Machine sleep:** on a laptop, a sleeping machine pauses runs and trips timeouts; use a server or disable sleep.
 
 ## Tests
-`cd backend && uv run pytest` (about 6 minutes; needs Chromium, Node/pnpm, git, and optionally Postgres binaries,
+`cd backend && uv run pytest` (about 10 minutes; needs Chromium, Node/pnpm, git, and optionally Postgres binaries,
 or set `A11Y_TEST_POSTGRES_URL`). `cd frontend && pnpm lint && pnpm typecheck && pnpm build`.
 `uv run python scripts/m1_prove.py --demo --out /tmp/m1` runs the whole loop on the bundled demo and writes a report.

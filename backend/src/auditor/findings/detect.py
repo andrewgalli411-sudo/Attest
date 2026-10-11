@@ -20,11 +20,13 @@ from ..pipeline.axe_runner import run_axe
 from ..pipeline.prober import PROBES, PageUnauditable, _guarded, _open
 from ..pipeline.probes._ax import ax_for_expr
 from ..storage.evidence_store import EvidenceStore
+from ..textsafe import strip_nul
 from . import locator as loc
 from .severity import axe_severity, probe_severity
 
 log = logging.getLogger(__name__)
 PAD = 16
+MAX_PAGE_W, MAX_PAGE_H = 8_000, 40_000  # bigger than this and a full-page screenshot can crash the renderer
 MAX_CLIP = (1400, 700)  # whole-page elements (html/body) are clipped to the top of the page
 CAPTION_PAD = 30  # extra room above the element for the accessibility caption chip
 SNIPPET_MAX = 1500
@@ -42,6 +44,7 @@ class RawFinding:
     dedupe_key: str = ""
     evidence: dict[str, bytes] = field(default_factory=dict)  # kind -> blob
     snippet: str = ""
+    dropped: bool = False  # counted (and scored) but not itemised, because the page exceeded the findings cap
 
 
 def identity(fp: dict) -> str:
@@ -89,6 +92,11 @@ _BOX_JS = """([b, caption]) => {
 _CLEAR_JS = "() => { for (const id of ['__a11y_box', '__a11y_cap']) document.getElementById(id)?.remove(); }"
 
 
+async def page_is_screenshot_safe(page: Page) -> bool:
+    w, h = await page.evaluate("() => [document.documentElement.scrollWidth, document.documentElement.scrollHeight]")
+    return w <= MAX_PAGE_W and h <= MAX_PAGE_H
+
+
 async def _evidence_for(page: Page, el: ElementHandle, fp: dict) -> tuple[dict[str, bytes], str]:
     """Clip + annotated full-page screenshots and a DOM snippet for one element.
 
@@ -107,7 +115,8 @@ async def _evidence_for(page: Page, el: ElementHandle, fp: dict) -> tuple[dict[s
     await page.evaluate(_BOX_JS, [b, caption])
     try:
         out["shot_clip"] = await page.screenshot(clip=clip, full_page=True, animations="disabled")
-        out["shot_full_annotated"] = await page.screenshot(full_page=True, animations="disabled")
+        if await page_is_screenshot_safe(page):  # a hostile page can be millions of pixels wide
+            out["shot_full_annotated"] = await page.screenshot(full_page=True, animations="disabled")
     finally:
         await page.evaluate(_CLEAR_JS)
     snippet = await el.evaluate("e => (e.parentElement || e).outerHTML")
@@ -119,25 +128,43 @@ async def _resolve_css(page: Page, css_path: str) -> ElementHandle | None:
     return h.as_element()
 
 
-async def _axe_findings(page: Page, state_ref: dict, with_evidence: bool = True) -> list[RawFinding]:
+_SEV_RANK = {"critical": 0, "serious": 1, "moderate": 2, "minor": 3}
+
+
+async def _axe_findings(page: Page, state_ref: dict, with_evidence: bool = True,
+                        limit: int | None = None) -> list[RawFinding]:
+    """All violations are returned (so the page score sees every one), but only the `limit` most severe are
+    itemised with a locator and screenshots; the rest are marked dropped. A page with thousands of violations
+    must not mean thousands of screenshots."""
     res = await run_axe(page)
+    nodes = sorted(((_SEV_RANK.get(v["impact"] or "", 2), v["rule"], json.dumps(n["target"]), v, n)
+                    for v in res["violations"] for n in v["nodes"]), key=lambda t: t[:3])
     out: list[RawFinding] = []
-    for v in res["violations"]:
-        for node in v["nodes"]:
-            tgt = node["target"]
-            fp, ev, snip = None, {}, node["html"]
-            if len(tgt) == 1 and isinstance(tgt[0], str):
-                el = await page.query_selector(tgt[0])
-                if el is not None:
-                    fp = await loc.build(el)
-                    if with_evidence:
-                        ev, snip = await _evidence_for(page, el, fp)
-            rf = RawFinding(
-                rule_id=v["rule"], sc_ids=v["sc"], severity=axe_severity(v["impact"]), source="axe",
-                fingerprint=fp, axe_target=tgt, detail={"axe_node": node, "impact": v["impact"]},
-                evidence=ev, snippet=snip)
-            rf.dedupe_key = make_dedupe_key(rf.rule_id, fp, state_ref, extra=json.dumps(tgt))
+    for i, (_rank, _rule, _tgt, v, node) in enumerate(nodes):
+        tgt = node["target"]
+        if limit is not None and i >= limit:
+            rf = RawFinding(rule_id=v["rule"], sc_ids=v["sc"], severity=axe_severity(v["impact"]), source="axe",
+                            fingerprint=None, axe_target=tgt, detail={}, dropped=True)
+            rf.dedupe_key = make_dedupe_key(rf.rule_id, None, state_ref, extra=json.dumps(tgt))
             out.append(rf)
+            continue
+        fp, ev, snip = None, {}, node["html"]
+        detail = {"axe_node": node, "impact": v["impact"]}
+        if len(tgt) == 1 and isinstance(tgt[0], str):
+            el = await page.query_selector(tgt[0])
+            if el is not None:
+                fp = await loc.build(el)
+                if with_evidence:
+                    ev, snip = await _evidence_for(page, el, fp)
+            else:
+                detail["unlocatable_reason"] = "the element was not found again after the page was analysed"
+        else:  # axe reports an element inside an iframe or shadow root as a nested target
+            detail["unlocatable_reason"] = "the element is inside an iframe or shadow root, which cannot be re-located"
+        rf = RawFinding(
+            rule_id=v["rule"], sc_ids=v["sc"], severity=axe_severity(v["impact"]), source="axe",
+            fingerprint=fp, axe_target=tgt, detail=detail, evidence=ev, snippet=snip)
+        rf.dedupe_key = make_dedupe_key(rf.rule_id, fp, state_ref, extra=json.dumps(tgt))
+        out.append(rf)
     return out
 
 
@@ -180,13 +207,14 @@ async def _probe_findings(
 async def detect_state(
     browser: Browser, url: str, *, steps: list[dict] | None = None, auth: dict | None = None,
     state_ref: dict | None = None, with_probes: bool = True, with_evidence: bool = True,
+    max_findings: int | None = 200,
 ) -> list[RawFinding]:
     """One detection pass over a state. Raises PageUnauditable if the state cannot be reached."""
     state_ref = state_ref or {"flow_name": None, "label": None, "steps": steps or []}
     ctx, page, _ = await _open(browser, url, steps, auth)
     try:
         await loc.install(page)
-        found = await _axe_findings(page, state_ref, with_evidence)
+        found = await _axe_findings(page, state_ref, with_evidence, max_findings)
         if with_probes:
             found += await _probe_findings(browser, page, url, state_ref, steps, auth, with_evidence)
         return found
@@ -204,10 +232,16 @@ def persist_findings(
 ) -> list[str]:
     """Write Findings (+locator +evidence). `second` is the repeat pass used for baseline stability."""
     stable = stable_keys(first, second) if second is not None else set()
+    instances: dict[str, int] = {}
+    for rf in first:
+        if not rf.dropped:
+            instances[rf.dedupe_key] = instances.get(rf.dedupe_key, 0) + 1
     ids: list[str] = []
     seen: set[str] = set()
     with sf() as db:
         for rf in first:
+            if rf.dropped:
+                continue
             if rf.dedupe_key in seen:
                 continue  # same rule on the same element reported twice in one pass
             seen.add(rf.dedupe_key)
@@ -223,15 +257,18 @@ def persist_findings(
             db.add(f)
             db.flush()
             db.add(FindingLocator(
-                finding_id=f.id, fingerprint=rf.fingerprint or {"unlocatable": True},
+                finding_id=f.id,
+                fingerprint=rf.fingerprint or {"unlocatable": True, "reason": (rf.detail or {}).get(
+                    "unlocatable_reason", "the element could not be located")},
                 axe_target=rf.axe_target, state_ref=state_ref))
             for kind, blob in rf.evidence.items():
                 ref, sha = store.put(run_id, page_state_id, f"{f.id}-{kind}.png", blob)
                 db.add(FindingEvidence(finding_id=f.id, stage="caught", kind=kind, blob_ref=ref, sha256=sha))
             db.add(FindingEvidence(finding_id=f.id, stage="caught", kind="dom_snippet",
-                                   payload={"html": rf.snippet}))
+                                   payload={"html": strip_nul(rf.snippet)}))
             db.add(FindingEvidence(finding_id=f.id, stage="caught", kind="detector_detail",
-                                   payload=json.loads(json.dumps(rf.detail, default=str))))
+                                   payload=strip_nul({**json.loads(json.dumps(rf.detail, default=str)),
+                                                         "instances": instances.get(rf.dedupe_key, 1)})))
             ids.append(f.id)
         db.commit()
     return ids

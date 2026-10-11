@@ -21,6 +21,7 @@ from playwright.async_api import async_playwright
 from sqlalchemy import func, select
 from sqlalchemy.orm import sessionmaker
 
+from .budget import BudgetedClient, BudgetExceeded
 from .findings import locator as loc
 from .findings.detect import RawFinding, detect_state, persist_findings
 from .findings.score import page_score, run_score
@@ -72,6 +73,9 @@ class RemediationConfig:
     fix_model: str = "claude-opus-5-5"
     with_probes: bool = False
     send_screenshots_to_model: bool = False  # privacy: off unless an operator opts in
+    model_token_budget: int = 1_500_000  # hard ceiling on language-model tokens for one run
+    max_findings_per_page: int = 200
+    refusal_fallback: bool = True  # re-run a declined request on a fallback model (server-side), when supported
     only_rules: list[str] | None = None
     max_fixes: int | None = None
     max_issues: int = 25
@@ -116,6 +120,7 @@ async def run_remediation(
     provider: RepoProvider | None = None,
 ) -> dict:
     provider = provider or LocalGitProvider(cfg.repo_path, allow_push=cfg.allow_push)
+    client = BudgetedClient(client, cfg.model_token_budget, refusal_fallback=cfg.refusal_fallback)
     began = False  # force-restore is only safe once we know the tree was clean when we started
     try:
         if not Path(cfg.repo_path).is_dir():
@@ -157,7 +162,12 @@ async def _run(run_id, sf, store, bus, client, cfg, provider, base_sha) -> dict:
             bus.emit(run_id, "stage.started", {"stage": "detect"})
             with dev_server(repo, cfg.dev_command) as base_url:
                 for pc in cfg.pages:
-                    pages.append(await _detect_page(sf, store, bus, browser, run_id, base_url, pc, cfg))
+                    try:
+                        pages.append(await _detect_page(sf, store, bus, browser, run_id, base_url, pc, cfg))
+                    except Exception as e:  # noqa: BLE001 - isolate the failure to this page and carry on
+                        _record_page_failure(sf, bus, run_id, base_url, pc, e)
+                if not pages:
+                    raise RuntimeError("no page could be audited; see the page errors for each reason")
                 await _map_sources(sf, store, browser, repo, run_id, pages, cfg)
             bus.emit(run_id, "stage.finished", {"stage": "detect"})
 
@@ -190,8 +200,24 @@ async def _run(run_id, sf, store, bus, client, cfg, provider, base_sha) -> dict:
 
 
 # ------------------------------------------------------------------------------------------ detect
+def _record_page_failure(sf, bus, run_id, base_url, pc, err: Exception) -> None:
+    reason = f"{type(err).__name__}: {str(err).splitlines()[0][:300] if str(err) else ''}"
+    with sf() as db:
+        label = pc.get("label", pc.get("path"))
+        row = db.scalar(select(PageState).where(PageState.run_id == run_id, PageState.state_label == label,
+                                                PageState.status == "probed"))  # created before detection began
+        if row is None:
+            row = PageState(run_id=run_id, url=base_url + str(pc.get("path", "")), flow_name=label, state_label=label)
+            db.add(row)
+        row.status, row.status_detail = "error", reason
+        db.commit()
+    bus.emit(run_id, "log", {"msg": f"page {pc.get('path')!r} could not be audited: {reason}"})
+
+
 async def _detect_page(sf, store, bus, browser, run_id, base_url, pc, cfg) -> dict:
     url = rebase_url(base_url + pc["path"], base_url)
+    if urlsplit(url).netloc != urlsplit(base_url).netloc or not str(pc["path"]).startswith("/"):
+        raise ValueError(f"page {pc['path']!r} would leave the audited app's origin")  # SSRF backstop
     steps = pc.get("steps")
     label = pc.get("label", pc["path"])
     state_ref = {"flow_name": label, "label": label, "steps": steps or []}
@@ -201,13 +227,18 @@ async def _detect_page(sf, store, bus, browser, run_id, base_url, pc, cfg) -> di
         db.commit()
         pid = ps.id
     first = await detect_state(browser, url, steps=steps, auth=cfg.auth, state_ref=state_ref,
-                               with_probes=cfg.with_probes)
+                               with_probes=cfg.with_probes, max_findings=cfg.max_findings_per_page)
     second = await detect_state(browser, url, steps=steps, auth=cfg.auth, state_ref=state_ref,
-                                with_probes=cfg.with_probes, with_evidence=False)
+                                with_probes=cfg.with_probes, with_evidence=False,
+                                max_findings=cfg.max_findings_per_page)
+    dropped = sum(1 for f in first if f.dropped)
     ids = persist_findings(sf, store, run_id, pid, state_ref, first, second)
     for fid in ids:
         bus.emit(run_id, "finding.caught", {"finding_id": fid, "page_state_id": pid})
-    score, breakdown = page_score((f.rule_id, f.severity) for f in first)
+    score, breakdown = page_score((f.rule_id, f.severity) for f in first)  # the score sees EVERY violation
+    breakdown["not_itemised"] = dropped
+    if dropped:
+        bus.emit(run_id, "log", {"msg": f"{pc.get('label', pc['path'])}: {dropped} lower-severity findings were counted but not itemised (cap {cfg.max_findings_per_page})"})
     with sf() as db:
         db.add(PageScore(run_id=run_id, page_state_id=pid, phase="baseline", score=score, breakdown=breakdown))
         db.commit()
@@ -299,7 +330,14 @@ async def _fix_one(sf, store, bus, client, cfg, provider, run_id, base_sha, fid,
     err = None
     for attempt in range(MAX_FIX_ATTEMPTS):
         file_text = (cfg.repo_path / hit.file).read_text()
-        authored = await author_mod.author_fix(client, cfg.fix_model, finding_ctx, hit, plan, file_text, err)
+        try:
+            authored = await author_mod.author_fix(client, cfg.fix_model, finding_ctx, hit, plan, file_text, err)
+        except BudgetExceeded as e:
+            err = str(e)
+            break
+        except Exception as e:  # noqa: BLE001 - one finding's model failure must not end the run
+            err = f"model error {type(e).__name__}"
+            break
         if not authored.valid:
             err = "; ".join(authored.notes)
             continue
@@ -518,8 +556,9 @@ def _summarise(sf, run_id, pages, after_scores, pr_urls, client, tiers) -> dict:
                                  .group_by(Finding.status)).all())
         counts = {k.value: v for k, v in counts.items()}
         total = sum(counts.values())
-        base = {s.page_state_id: s.score for s in db.scalars(select(PageScore).where(
-            PageScore.run_id == run_id, PageScore.phase == "baseline"))}
+        baseline_rows = db.scalars(select(PageScore).where(PageScore.run_id == run_id, PageScore.phase == "baseline")).all()
+        base = {s.page_state_id: s.score for s in baseline_rows}
+        not_itemised = sum((s.breakdown or {}).get("not_itemised", 0) for s in baseline_rows)
         sev = dict(db.execute(select(Finding.severity, func.count()).where(Finding.run_id == run_id)
                               .group_by(Finding.severity)).all())
         regress = db.scalar(select(func.coalesce(func.sum(RegressionCheck.regressions_count), 0))
@@ -534,11 +573,14 @@ def _summarise(sf, run_id, pages, after_scores, pr_urls, client, tiers) -> dict:
         "by_severity": {k.value: v for k, v in sev.items()},
         "proved": auto_fixed, "needs_human": needs_human,
         "inconclusive": counts.get("inconclusive", 0) + counts.get("prove_failed", 0),
-        "regressions": int(regress or 0),
+        "regressions": int(regress or 0), "findings_not_itemised": not_itemised,
         "score_before": run_score(list(base.values())), "score_after": run_score(list(final.values())),
         "prs": {k: v for k, v in pr_urls.items() if k != "issues"}, "issues_opened": len(pr_urls.get("issues", [])),
         "branches": {k: v["branch"] for k, v in tiers.items()},
         "model_kind": "scripted (not a language model)" if getattr(client, "scripted", False) else "language model",
+        "model_tokens_used": getattr(client, "used", 0), "model_token_budget": getattr(client, "budget", None),
+        "model_budget_exhausted": bool(getattr(client, "exhausted", False)),
+        "refusal_fallbacks_used": getattr(client, "fallbacks_used", 0),
         "notice": "Automated first pass. Every change is a pull request for a human to review.",
     }
 

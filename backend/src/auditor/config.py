@@ -33,6 +33,10 @@ class Settings(BaseSettings):
     # ---- privacy: what may be sent to the language model
     send_screenshots_to_model: bool = False
 
+    model_token_budget: int = 1_500_000  # per run; when spent, remaining findings go to a person
+    max_findings_per_page: int = 200
+    refusal_fallback: bool = True  # server-side retry on a fallback model when the primary declines a request
+    max_request_bytes: int = 64 * 1024
     max_concurrent_runs: int = 1
     run_timeout_s: int = 3600
 

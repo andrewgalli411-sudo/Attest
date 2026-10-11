@@ -7,6 +7,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import HTMLResponse, Response, StreamingResponse
 from sqlalchemy import select
 
@@ -35,6 +36,7 @@ from .schemas import (
     Dashboard,
     DecisionIn,
     DecisionOut,
+    ErrorOut,
     EvidenceOut,
     FindingDetail,
     FindingRow,
@@ -47,10 +49,15 @@ from .schemas import (
     RunOut,
     ScoreOut,
     StartRun,
+    StatusOut,
     TriageOut,
 )
 
-router = APIRouter(prefix="/api", dependencies=[Depends(require_auth)])
+router = APIRouter(prefix="/api", dependencies=[Depends(require_auth)], responses={
+    code: {"model": ErrorOut, "description": why}
+    for code, why in ((401, "missing or invalid API token"), (403, "not allowed on this server"), (404, "not found"),
+                      (409, "conflicts with the current state"), (411, "Content-Length required"),
+                      (413, "request body too large"), (421, "host not allowed"), (429, "a run is already in progress"))})
 FIXED = {"proved", "regress_ok", "regress_fail"}
 TERMINAL = {RunStatus.complete, RunStatus.failed, RunStatus.cancelled, RunStatus.reviewed, RunStatus.exported}
 KEEPALIVE_S = 15
@@ -65,12 +72,23 @@ def _run_out(run: AuditRun) -> RunOut:
                   headline=(run.summary or {}).get("headline"))
 
 
+@router.get("/status", response_model=StatusOut)
+def status(d=Depends(deps)):
+    """Operational counters. Authenticated, unlike /health."""
+    return StatusOut(active_runs=d.active_runs(), max_concurrent_runs=d.cfg.max_concurrent_runs,
+                     event_subscribers=sum(len(v) for v in d.bus._subs.values()))
+
+
 @router.get("/config", response_model=ConfigOut)
 def get_config(d=Depends(deps)):
     """What this server will let a caller do. Never includes commands, paths, or secrets."""
     return ConfigOut(
         demo_enabled=d.cfg.demo_enabled, allow_custom_runs=d.cfg.allow_custom_runs, auth_required=bool(d.cfg.api_token),
         projects=[ProjectInfo(name=n, pages=p.pages, can_publish=p.allow_push) for n, p in sorted(d.projects.items())])
+
+
+def _pages(specs) -> list[dict] | None:
+    return None if specs is None else [{"path": s.path, "label": s.label or s.path} for s in specs]
 
 
 def _resolve(body: StartRun, d) -> tuple[str, RemediationConfig | None]:
@@ -83,7 +101,7 @@ def _resolve(body: StartRun, d) -> tuple[str, RemediationConfig | None]:
             raise HTTPException(409, f"project {body.project!r} points at a repository that does not exist on the server")
         cfg = RemediationConfig(
             repo_path=Path(proj.repo_path), dev_command=proj.dev_command, check_commands=proj.check_commands,
-            pages=body.pages or proj.pages, auth={"cookies": proj.auth_cookies} if proj.auth_cookies else None,
+            pages=_pages(body.pages) or proj.pages, auth={"cookies": proj.auth_cookies} if proj.auth_cookies else None,
             base_branch=proj.base_branch, allow_push=bool(body.publish and proj.allow_push),
             only_rules=body.only_rules, max_fixes=body.max_fixes, with_probes=body.with_probes)
         if body.publish and not proj.allow_push:
@@ -102,16 +120,16 @@ def _resolve(body: StartRun, d) -> tuple[str, RemediationConfig | None]:
             raise HTTPException(403, "custom runs cannot publish")
         return body.repo_path, RemediationConfig(
             repo_path=Path(body.repo_path), dev_command=body.dev_command, check_commands=body.check_commands,
-            pages=body.pages or [{"path": "/", "label": "home"}],
+            pages=_pages(body.pages) or [{"path": "/", "label": "home"}],
             auth={"cookies": body.auth_cookies} if body.auth_cookies else None, base_branch=body.base_branch,
             only_rules=body.only_rules, max_fixes=body.max_fixes, with_probes=body.with_probes)
-    raise HTTPException(422, "give a project name (or demo=true)")
+    raise RequestValidationError([{"type": "value_error", "loc": ["body"], "msg": "give a project name (or demo=true)", "input": None}])
 
 
 @router.post("/runs", response_model=RunOut, status_code=202)
 async def start_run(body: StartRun, d=Depends(deps)):
     target, cfg = _resolve(body, d)
-    if len(d.tasks) >= d.cfg.max_concurrent_runs:
+    if d.active_runs() >= d.cfg.max_concurrent_runs:
         raise HTTPException(429, "a run is already in progress; wait for it to finish or cancel it",
                             headers={"Retry-After": "30"})
     with d.sf() as db:
@@ -120,6 +138,10 @@ async def start_run(body: StartRun, d=Depends(deps)):
         db.commit()
         db.refresh(run)
         out = _run_out(run)
+    if not d.claim_slot(out.id):  # another worker won the race between our check and our insert
+        d.withdraw(out.id)
+        raise HTTPException(429, "a run is already in progress; wait for it to finish or cancel it",
+                            headers={"Retry-After": "30"})
     d.spawn(out.id, _execute(d, out.id, body, cfg))
     return out
 
@@ -130,10 +152,13 @@ async def _execute(d, run_id: str, body: StartRun, cfg: RemediationConfig | None
         if cfg is None:  # demo
             repo, _ = await asyncio.to_thread(prepare_demo_repo, Path(d.work_dir) / "demos" / run_id)
             cfg = RemediationConfig(repo_path=repo, dev_command=DEV_COMMAND, check_commands=["pnpm build"],
-                                    pages=body.pages or [{"path": "/", "label": "profile"}], auth=SEED_AUTH,
+                                    pages=_pages(body.pages) or [{"path": "/", "label": "profile"}], auth=SEED_AUTH,
                                     only_rules=body.only_rules, max_fixes=body.max_fixes, with_probes=body.with_probes)
         cfg.triage_model, cfg.fix_model = d.cfg.triage_model, d.cfg.fix_model
         cfg.send_screenshots_to_model = d.cfg.send_screenshots_to_model
+        cfg.model_token_budget = d.cfg.model_token_budget
+        cfg.max_findings_per_page = d.cfg.max_findings_per_page
+        cfg.refusal_fallback = d.cfg.refusal_fallback
         await asyncio.wait_for(run_remediation(run_id, d.sf, d.store, d.bus, d.client_factory(), cfg),
                                timeout=d.cfg.run_timeout_s)
     except TimeoutError:
@@ -274,7 +299,9 @@ def evidence_blob(evidence_id: str, d=Depends(deps)):
 def report(run_id: str, d=Depends(deps)):
     with d.sf() as db:
         _get_run(db, run_id)
-    return HTMLResponse(run_report(d.sf, d.store, run_id))
+    return HTMLResponse(run_report(d.sf, d.store, run_id), headers={
+        "Content-Security-Policy": "default-src 'none'; img-src data:; style-src 'unsafe-inline'; base-uri 'none'; "
+        "form-action 'none'; frame-ancestors 'none'"})
 
 
 @router.post("/findings/{finding_id}/decision", response_model=DecisionOut, status_code=201)
@@ -309,6 +336,8 @@ async def events(run_id: str, request: Request, after: int = Query(0, ge=0), d=D
     async def gen() -> AsyncIterator[str]:
         q = d.bus.subscribe(run_id)  # subscribe BEFORE replaying so nothing is missed in between
         try:
+            # Flush something immediately: clients learn the stream is live and buffering proxies release it.
+            yield "retry: 3000\n: connected\n\n"
             seen = last
             with d.sf() as db:
                 for ev in d.bus.replay(db, run_id, seen):

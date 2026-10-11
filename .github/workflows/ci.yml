@@ -2,6 +2,7 @@ name: ci
 on:
   push: {branches: [main]}
   pull_request:
+permissions: {contents: read}  # least privilege: CI only reads the repository
 concurrency: {group: "ci-${{ github.ref }}", cancel-in-progress: true}
 jobs:
   backend:

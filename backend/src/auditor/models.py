@@ -81,6 +81,8 @@ class AuditRun(Base):
     tool_versions: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Stamped every few seconds by whichever process owns the run; a stale stamp means the owner died.
+    heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     page_states: Mapped[list[PageState]] = relationship(back_populates="run")
 
 

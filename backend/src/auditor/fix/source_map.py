@@ -17,6 +17,8 @@ from pathlib import Path
 
 from playwright.async_api import ElementHandle
 
+from ..gitsafe import git_cmd, git_env, is_plain_path
+
 SOURCE_EXT = {".jsx", ".tsx", ".js", ".ts", ".vue", ".svelte", ".html", ".astro", ".mdx"}
 SKIP_DIRS = {"node_modules", "dist", "build", ".next", ".git", ".nuxt", "coverage"}
 MAX_FILE_BYTES = 400_000
@@ -55,13 +57,14 @@ class Resolution:
 def tracked_files(repo: Path) -> list[Path]:
     """Source files in the repo (git-tracked when possible; otherwise a filtered walk)."""
     try:
-        out = subprocess.run(["git", "ls-files", "-co", "--exclude-standard"], cwd=repo, check=True,
-                             capture_output=True, text=True).stdout.splitlines()
+        out = subprocess.run(git_cmd("ls-files", "-co", "--exclude-standard"), cwd=repo, check=True,
+                             capture_output=True, text=True, env=git_env()).stdout.splitlines()
         paths = [repo / p for p in out]
     except (subprocess.CalledProcessError, FileNotFoundError):
         paths = [p for p in repo.rglob("*") if p.is_file()]
     return [p for p in paths
             if p.suffix in SOURCE_EXT and not (set(p.relative_to(repo).parts) & SKIP_DIRS)
+            and is_plain_path(repo, p)  # never follow a symlink: it could lead outside the repository
             and p.is_file() and p.stat().st_size <= MAX_FILE_BYTES]
 
 
@@ -228,7 +231,7 @@ def from_grep(repo: Path, fp: dict) -> tuple[list[SourceHit], int]:
 async def resolve(repo: Path, fp: dict, el: ElementHandle | None = None) -> Resolution:
     """Fiber first (if we have the live element), then grep. unique=False unless exactly one location."""
     if fp.get("unlocatable"):
-        return Resolution(None, False, "element could not be located in the page")
+        return Resolution(None, False, fp.get("reason") or "element could not be located in the page")
     fiber = None
     if el is not None:
         fiber = await from_fiber(repo, el, fp["tag"])

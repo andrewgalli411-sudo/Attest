@@ -13,6 +13,7 @@ A rule with no policy cannot be auto-fixed, however confident the model is.
 from __future__ import annotations
 
 import re
+from collections import Counter
 from dataclasses import dataclass, field
 
 from .source_map import opening_tag_end
@@ -26,16 +27,17 @@ class UnsafeEdit(ValueError):
 class Policy:
     attrs: frozenset[str]  # attributes this rule's fix may add or change on the element
     new_elements: frozenset[str] = field(default_factory=frozenset)  # elements the fix may add next to it
+    retag_to_label: bool = False  # may turn a sibling text element (span/div/p/...) into a <label> bound to the field
     description: str = ""
 
 
-def _p(attrs: str, new: str = "", desc: str = "") -> Policy:
-    return Policy(frozenset(attrs.split()), frozenset(new.split()), desc)
+def _p(attrs: str, new: str = "", desc: str = "", retag: bool = False) -> Policy:
+    return Policy(frozenset(attrs.split()), frozenset(new.split()), retag, desc)
 
 
 POLICY: dict[str, Policy] = {
-    "label": _p("aria-label aria-labelledby id for htmlFor", "label", "name a form field"),
-    "select-name": _p("aria-label aria-labelledby id for htmlFor", "label", "name a select"),
+    "label": _p("aria-label aria-labelledby id for htmlFor", "label", "name a form field", retag=True),
+    "select-name": _p("aria-label aria-labelledby id for htmlFor", "label", "name a select", retag=True),
     "html-has-lang": _p("lang", "", "declare the page language"),
     "html-lang-valid": _p("lang", "", "correct the page language"),
     "button-name": _p("aria-label aria-labelledby title", "", "name a button"),
@@ -154,16 +156,75 @@ def _norm(name: str) -> str:
     return JSX_ALIAS.get(name, name)
 
 
-def _first_tag(text: str, tag_name: str) -> str | None:
-    m = re.search(rf"<\s*{re.escape(tag_name)}(?=[\s/>])", text)
-    if not m:
-        return None
-    end = opening_tag_end(text, m.start())
-    return text[m.start():end] if end else None
+RETAG_FROM = frozenset({"span", "div", "p", "strong", "b", "em", "i", "small"})  # plain text containers only
+NEW_ELEMENT_EXTRA_ATTRS = frozenset({"class", "className"})  # styling only, so a new <label> can match its neighbours
+
+
+@dataclass
+class _Tag:
+    kind: str  # "open" | "close"
+    name: str
+    attrs: dict[str, str] = field(default_factory=dict)
+    selfclose: bool = False
+
+
+def _scan(s: str) -> tuple[list[_Tag], list[str]]:
+    """Tags in order, and the text between them (JSX {expressions} count as text)."""
+    tags: list[_Tag] = []
+    texts: list[str] = []
+    buf: list[str] = []
+    i = 0
+
+    def flush() -> None:
+        t = "".join(buf).strip()
+        if t:
+            texts.append(t)
+        buf.clear()
+
+    while i < len(s):
+        if s[i] == "<" and i + 1 < len(s) and (s[i + 1].isalpha() or (s[i + 1] == "/" and i + 2 < len(s) and s[i + 2].isalpha())):
+            flush()
+            if s[i + 1] == "/":
+                m = re.match(r"</\s*([A-Za-z][\w.:-]*)\s*>", s[i:])
+                if not m:
+                    raise UnsafeEdit("malformed closing tag")
+                tags.append(_Tag("close", m.group(1).lower()))
+                i += m.end()
+            else:
+                end = opening_tag_end(s, i)
+                if end is None:
+                    raise UnsafeEdit("unterminated tag")
+                text = s[i:end]
+                name = re.match(r"<\s*([A-Za-z][\w.:-]*)", text).group(1).lower()
+                tags.append(_Tag("open", name, parse_attrs(text), text.rstrip().endswith("/>")))
+                i = end
+        else:
+            buf.append(s[i])
+            i += 1
+    flush()
+    return tags, texts
+
+
+def _is_subsequence(needle: list[str], hay: list[str]) -> bool:
+    it = iter(hay)
+    return all(any(n == h for h in it) for n in needle)
+
+
+def _unquote(v: str) -> str:
+    v = v.strip()
+    if len(v) >= 2 and v[0] in "\"'" and v[-1] == v[0]:
+        return v[1:-1]
+    if v.startswith("{") and v.endswith("}"):
+        return _unquote(v[1:-1])
+    return v
 
 
 def check_edit_shape(rule_id: str, anchor: str, replacement: str) -> None:
-    """Raise UnsafeEdit unless this edit is within the policy for `rule_id`."""
+    """Raise UnsafeEdit unless this edit is within the policy for `rule_id`.
+
+    Every element of the anchor must survive (same tag, or the one allowed retag), may only gain/alter the
+    attributes the rule allows, and keeps all of its text. New elements must be on the rule's list, bound,
+    and carry only allowed attributes."""
     pol = POLICY.get(rule_id)
     if pol is None:
         raise UnsafeEdit(f"rule {rule_id!r} has no edit policy, so it cannot be auto-fixed")
@@ -172,33 +233,82 @@ def check_edit_shape(rule_id: str, anchor: str, replacement: str) -> None:
         if len(pat.findall(replacement)) > len(pat.findall(anchor)):
             raise UnsafeEdit(f"edit {why}")
 
-    anchor_tags = {t.lower() for t in _TAG.findall(anchor)}
-    repl_tags = [t for t in _TAG.findall(replacement)]
-    allowed = anchor_tags | {t.lower() for t in pol.new_elements}
-    for t in repl_tags:
-        if t.lower() not in allowed:
-            raise UnsafeEdit(f"edit adds a <{t}> element, which the {rule_id!r} policy does not allow")
-
-    first = _TAG.search(anchor)
-    if first is None:
+    a_tags, a_texts = _scan(anchor)
+    r_tags, r_texts = _scan(replacement)
+    A = [t for t in a_tags if t.kind == "open"]
+    R = [t for t in r_tags if t.kind == "open"]
+    if not A:
         raise UnsafeEdit("anchor_text does not start an element")
-    primary = first.group(1)
-    old_tag, new_tag = _first_tag(anchor, primary), _first_tag(replacement, primary)
-    if old_tag is None:
-        raise UnsafeEdit("could not read the anchor element")
-    if new_tag is None:
-        raise UnsafeEdit(f"edit removes or renames the <{primary}> element")
 
-    old, new = parse_attrs(old_tag), parse_attrs(new_tag)
+    def compatible(a: _Tag, r: _Tag) -> bool:
+        return a.name == r.name or (pol.retag_to_label and a.name in RETAG_FROM and r.name == "label")
+
+    matched: dict[int, int] = {}
+    new: list[int] = []
+    ai = 0
+    for ri, r in enumerate(R):
+        if ai < len(A) and compatible(A[ai], r):
+            matched[ai] = ri
+            ai += 1
+        else:
+            new.append(ri)
+    if ai != len(A):
+        raise UnsafeEdit("edit removes or renames an element")
+
     allowed_attrs = pol.attrs | {_norm(a) for a in pol.attrs}
-    for name in old:
-        if name not in new:
-            raise UnsafeEdit(f"edit removes attribute {name!r}")
-    for name, val in new.items():
-        if name not in old:
-            if name.startswith("..."):
-                raise UnsafeEdit("edit adds a spread attribute")
-            if name not in allowed_attrs and _norm(name) not in allowed_attrs:
-                raise UnsafeEdit(f"edit adds attribute {name!r}, not allowed for {rule_id!r}")
-        elif old[name] != val and name not in allowed_attrs and _norm(name) not in allowed_attrs:
-            raise UnsafeEdit(f"edit changes attribute {name!r}, not allowed for {rule_id!r}")
+
+    def attr_ok(name: str) -> bool:
+        return name in allowed_attrs or _norm(name) in allowed_attrs
+
+    for a_i, r_i in matched.items():
+        a, r = A[a_i], R[r_i]
+        for name in a.attrs:
+            if name not in r.attrs:
+                raise UnsafeEdit(f"edit removes attribute {name!r}")
+        for name, val in r.attrs.items():
+            if name not in a.attrs:
+                if name.startswith("..."):
+                    raise UnsafeEdit("edit adds a spread attribute")
+                if not attr_ok(name):
+                    raise UnsafeEdit(f"edit adds attribute {name!r}, not allowed for {rule_id!r}")
+            elif a.attrs[name] != val and not attr_ok(name):
+                raise UnsafeEdit(f"edit changes attribute {name!r}, not allowed for {rule_id!r}")
+        if a.selfclose != r.selfclose:
+            raise UnsafeEdit("edit changes whether an element is self-closing")
+
+    for r_i in new:
+        r = R[r_i]
+        if r.name not in pol.new_elements:
+            raise UnsafeEdit(f"edit adds a <{r.name}> element, which the {rule_id!r} policy does not allow")
+        for name in r.attrs:
+            if name.startswith("...") or not (attr_ok(name) or name in NEW_ELEMENT_EXTRA_ATTRS):
+                raise UnsafeEdit(f"new <{r.name}> carries attribute {name!r}, not allowed for {rule_id!r}")
+
+    # Closing tags: an anchor often holds only an opening tag (its closing tag is elsewhere in the file), so
+    # expect exactly the anchor's own closing tags - renamed where an element was retagged - plus the closing
+    # tag of every new element, which must be inside the replacement.
+    expected = Counter(t.name for t in a_tags if t.kind == "close")
+    for a_i, r_i in matched.items():
+        if A[a_i].name != R[r_i].name and expected[A[a_i].name] > 0:
+            expected[A[a_i].name] -= 1
+            expected[R[r_i].name] += 1
+    expected += Counter(R[i].name for i in new if not R[i].selfclose)
+    if +expected != Counter(t.name for t in r_tags if t.kind == "close"):
+        raise UnsafeEdit("edit leaves tags unbalanced or changes closing tags")
+
+    # existing text is preserved; new text may appear only because a new element carries it
+    if new:
+        if not _is_subsequence(a_texts, r_texts):
+            raise UnsafeEdit("edit changes or removes existing text")
+    elif r_texts != a_texts:
+        raise UnsafeEdit("edit changes or adds text")
+
+    # a <label> only counts if it is bound to a field that exists in the same edit
+    labels = [R[i] for i in new if R[i].name == "label"] + [R[ri] for ai2, ri in matched.items() if R[ri].name == "label" and A[ai2].name != "label"]
+    ids = {_unquote(t.attrs["id"]) for t in R if "id" in t.attrs}
+    for lab in labels:
+        target = lab.attrs.get("htmlFor") or lab.attrs.get("for")
+        if target is None:
+            raise UnsafeEdit("a <label> must be bound with htmlFor/for")
+        if _unquote(target) not in ids:
+            raise UnsafeEdit("a <label> points at an id that does not exist in the edit")

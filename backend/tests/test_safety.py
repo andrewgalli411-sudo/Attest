@@ -132,3 +132,56 @@ def test_apply_and_verify_rejects_unsafe_edits_and_leaves_the_file_untouched(tmp
     with pytest.raises(EditError):
         from auditor.fix.verify import apply_edits
         apply_edits(tmp_path, [good], {"src/App.jsx"}, rule_id="heading-order")
+
+
+
+# ---------------- multi-element anchors (found by running the real model) ----------------
+SPAN = '<span className="field-label">Email address</span>'
+PAIR = SPAN + "\n          " + INPUT
+LABELLED_INPUT = INPUT.replace("<input ", '<input id="email" ')
+GOOD_RETAG = '<label htmlFor="email" className="field-label">Email address</label>\n          ' + LABELLED_INPUT
+FALLBACK = ('<span id="email-label" className="field-label">Email address</span>\n          '
+            + INPUT.replace("/>", 'aria-labelledby="email-label" />'))
+NAMED = 'aria-label="x" />'
+
+
+@pytest.mark.parametrize("repl", [GOOD_RETAG, FALLBACK])
+def test_the_edits_a_real_model_proposes_for_a_label_are_allowed(repl):
+    ok("label", PAIR, repl)
+
+
+@pytest.mark.parametrize("repl,match", [
+    # retag without binding / binding to nothing
+    (GOOD_RETAG.replace(' htmlFor="email"', ""), "must be bound"),
+    (GOOD_RETAG.replace('htmlFor="email"', 'htmlFor="nope"'), "does not exist"),
+    # retag to something that is not a label, or from something that is not a text container
+    (GOOD_RETAG.replace("<label", "<button").replace("</label>", "</button>"), "removes or renames|does not allow"),
+    ('<a href="x">Email address</a>\n' + LABELLED_INPUT, "removes or renames|does not allow"),
+    # the SECOND element in the anchor must obey the same rules as the first (the gap the real run exposed)
+    (SPAN + "\n" + INPUT.replace('type="email"', 'type="password"').replace("/>", NAMED), "changes attribute 'type'"),
+    (SPAN + "\n" + INPUT.replace('name="email"', 'name="x"').replace("/>", NAMED), "changes attribute 'name'"),
+    (SPAN + "\n" + INPUT.replace("/>", 'aria-label="x" disabled />'), "adds attribute 'disabled'"),
+    (SPAN + "\n" + INPUT.replace("/>", 'aria-label="x" onFocus={steal} />'), "event handler"),
+    (SPAN + "\n" + INPUT.replace('autoComplete="email" ', "").replace("/>", NAMED), "removes attribute"),
+    # visible text is part of the page: it may not be reworded, removed, or added to
+    (PAIR.replace("Email address", "Password").replace("/>", NAMED), "changes or removes existing text|changes or adds text"),
+    ('<span className="field-label"></span>\n' + INPUT.replace("/>", NAMED), "changes or removes existing text|changes or adds text"),
+    (PAIR.replace("</span>", " (required)</span>").replace("/>", NAMED), "changes or removes existing text|changes or adds text"),
+    # structure: dropping an element, or leaving tags unbalanced
+    (INPUT.replace("/>", NAMED), "removes or renames"),
+    (GOOD_RETAG.replace("</label>", "</span>"), "unbalanced"),
+])
+def test_multi_element_edits_are_checked_element_by_element(repl, match):
+    bad("label", PAIR, repl, match)
+
+
+def test_a_new_label_may_carry_only_styling_never_arbitrary_attributes():
+    ok("label", INPUT, '<label htmlFor="email" className="x">Email address</label>\n' + LABELLED_INPUT)
+    bad("label", INPUT, '<label htmlFor="email" style={{display: "none"}}>Email address</label>\n' + LABELLED_INPUT, "carries attribute")
+    bad("label", INPUT, '<label htmlFor="email" tabIndex="0">Email address</label>\n' + LABELLED_INPUT, "carries attribute")
+
+
+def test_retagging_is_only_for_rules_that_name_form_fields():
+    bad("button-name", "<span>Go</span>\n" + BTN, '<label htmlFor="x">Go</label>\n' + BTN.replace(">", ' aria-label="Go">'),
+        "removes or renames|does not allow")
+    bad("html-has-lang", "<html>", '<label htmlFor="x">y</label><html lang="en">', "removes or renames|does not allow")

@@ -28,6 +28,9 @@ dev = [
     "httpx>=0.27",
     "ruff>=0.7",
     "pytest-timeout>=2.4.0",
+    "schemathesis>=4.30.1",
+    "hypothesis>=6.168.5",
+    "pyyaml>=6.0.3",
 ]
 
 [build-system]
@@ -41,6 +44,7 @@ packages = ["src/auditor"]
 asyncio_mode = "auto"
 timeout = 120
 timeout_method = "thread"
+markers = ["live: calls the real Anthropic API; only runs when A11Y_LIVE=1 (costs a few cents)"]
 testpaths = ["tests"]
 
 [tool.ruff]

@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 
 from ..disclaimers import contains_banned_claim
 from ..privacy import PLACEHOLDER, redact, redact_json
+from ..textsafe import strip_nul
 from .safety import UnsafeEdit, check_edit_shape
 from .source_map import SourceHit
 
@@ -112,8 +113,8 @@ async def author_fix(client, model: str, finding: dict, hit: SourceHit, plan: st
     text = next((b.text for b in resp.content if b.type == "text"), "")
     try:
         data = json.loads(text)
-        out.edits = [dict(e) for e in data["edits"]]
-        out.explanation = str(data["explanation"])
+        out.edits = strip_nul([dict(e) for e in data["edits"]])
+        out.explanation = strip_nul(str(data["explanation"]))
         out.confidence = float(data["confidence"])
     except (json.JSONDecodeError, KeyError, TypeError, ValueError) as e:
         out.notes.append(f"unparseable response: {type(e).__name__}")

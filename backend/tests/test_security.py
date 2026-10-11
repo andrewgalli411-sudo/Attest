@@ -1,6 +1,7 @@
 import asyncio
 import json
 import subprocess
+from datetime import UTC, datetime, timedelta
 
 import httpx
 import pytest
@@ -215,7 +216,9 @@ async def test_a_run_that_exceeds_its_time_limit_is_failed_and_cleaned_up(sf, tm
 
 async def test_runs_orphaned_by_a_restart_are_marked_failed_not_left_running(sf, tmp_path):
     with sf() as db:
-        stuck = [AuditRun(target_url="x", status=s) for s in (RunStatus.detecting, RunStatus.fixing, RunStatus.queued)]
+        long_ago = datetime.now(UTC) - timedelta(minutes=10)
+        stuck = [AuditRun(target_url="x", status=s, created_at=long_ago, heartbeat_at=long_ago)
+                 for s in (RunStatus.detecting, RunStatus.fixing, RunStatus.queued)]
         done = AuditRun(target_url="y", status=RunStatus.complete)
         db.add_all([*stuck, done])
         db.commit()
@@ -238,3 +241,145 @@ async def test_interactive_docs_and_schema_are_not_exposed_unless_enabled(sf, tm
     async with http(on) as c:
         assert (await c.get("/openapi.json")).status_code == 200
     assert "paths" in off.openapi()  # the export script still works without publishing it
+
+
+# ---------------------------------------------------------------- several API workers sharing one database
+def _run(db, status, *, beat_ago=None, created_ago=timedelta(minutes=30)):
+    now = datetime.now(UTC)
+    r = AuditRun(target_url="x", status=status, created_at=now - created_ago,
+                 heartbeat_at=None if beat_ago is None else now - beat_ago)
+    db.add(r)
+    db.commit()
+    return r.id
+
+
+async def test_a_restart_does_not_fail_a_run_that_another_worker_is_still_beating(sf, tmp_path):
+    with sf() as db:
+        alive = _run(db, RunStatus.detecting, beat_ago=timedelta(seconds=10))     # another worker owns it
+        dead = _run(db, RunStatus.detecting, beat_ago=timedelta(minutes=10))      # its owner died
+        never = _run(db, RunStatus.fixing, beat_ago=None)                         # old, never beat
+        fresh = _run(db, RunStatus.queued, beat_ago=None, created_ago=timedelta(seconds=5))  # just created, not yet beating
+    app = make_app(sf, tmp_path)
+    async with app.router.lifespan_context(app):
+        pass
+    with sf() as db:
+        assert db.get(AuditRun, alive).status == RunStatus.detecting, "killed a live run owned by another worker"
+        assert db.get(AuditRun, fresh).status == RunStatus.queued, "failed a run that was only just created"
+        assert db.get(AuditRun, dead).status == RunStatus.failed
+        assert db.get(AuditRun, never).status == RunStatus.failed
+
+
+async def test_the_one_run_limit_holds_across_workers_sharing_a_database(sf, tmp_path):
+    worker1, worker2 = make_app(sf, tmp_path), make_app(sf, tmp_path)  # two processes, one database
+    with sf() as db:
+        _run(db, RunStatus.reproving, beat_ago=timedelta(seconds=5))  # a run that worker1 owns and is beating
+    async with http(worker2) as c:
+        r = await c.post("/api/runs", json={"demo": True})
+        assert r.status_code == 429, "worker2 started a second run while worker1 was busy"
+    assert worker1.state.deps.active_runs() == worker2.state.deps.active_runs() == 1
+
+
+async def test_a_dead_workers_run_does_not_block_new_runs_forever(sf, tmp_path):
+    app = make_app(sf, tmp_path)
+    with sf() as db:
+        _run(db, RunStatus.reproving, beat_ago=timedelta(minutes=10))  # stale: owner is gone
+    assert app.state.deps.active_runs() == 0
+    async with http(app) as c:
+        r = await c.post("/api/runs", json={"demo": True})
+        assert r.status_code == 202
+        await c.post(f"/api/runs/{r.json()['id']}/cancel")
+
+
+async def test_the_owner_keeps_beating_and_stops_when_the_run_ends(sf, tmp_path, monkeypatch):
+    from auditor import main as main_mod
+
+    monkeypatch.setattr(main_mod, "HEARTBEAT_S", 0.2)
+    app = make_app(sf, tmp_path)
+    d = app.state.deps
+    with sf() as db:
+        rid = _run(db, RunStatus.detecting, created_ago=timedelta(seconds=1))
+    d.spawn(rid, asyncio.sleep(1.5))
+    seen = set()
+    for _ in range(10):
+        await asyncio.sleep(0.15)
+        with sf() as db:
+            seen.add(db.get(AuditRun, rid).heartbeat_at)
+    assert len(seen - {None}) >= 3, f"heartbeat did not advance: {seen}"
+    await asyncio.sleep(0.8)  # the task has finished by now
+    with sf() as db:
+        last = db.get(AuditRun, rid).heartbeat_at
+    await asyncio.sleep(0.6)
+    with sf() as db:
+        assert db.get(AuditRun, rid).heartbeat_at == last, "kept beating after the run ended"
+
+
+# ---------------------------------------------------------------- races
+async def test_two_workers_racing_past_the_precheck_cannot_both_start_a_run(sf, tmp_path, monkeypatch):
+    """Simulate the check-then-insert race: both workers believe the system is idle."""
+    w1, w2 = make_app(sf, tmp_path), make_app(sf, tmp_path)
+    for app in (w1, w2):
+        monkeypatch.setattr(app.state.deps, "active_runs", lambda: 0)  # both pre-checks pass
+    async with http(w1) as c1, http(w2) as c2:
+        results = await asyncio.gather(*[c.post("/api/runs", json={"demo": True}) for c in (c1, c2, c1, c2, c1, c2)])
+        codes = sorted(r.status_code for r in results)
+        assert codes == [202, 429, 429, 429, 429, 429], codes
+        winner = next(r.json()["id"] for r in results if r.status_code == 202)
+        with sf() as db:
+            live = [r.id for r in db.scalars(select(AuditRun).where(AuditRun.status.notin_([RunStatus.complete, RunStatus.failed, RunStatus.cancelled])))]
+        assert live == [winner], "losers must withdraw their rows"
+        for app_client in (c1, c2):
+            await app_client.post(f"/api/runs/{winner}/cancel")
+
+
+async def test_a_large_burst_of_requests_starts_exactly_one_run(sf, tmp_path):
+    app = make_app(sf, tmp_path)
+    async with http(app) as c:
+        results = await asyncio.gather(*[c.post("/api/runs", json={"demo": True}) for _ in range(40)])
+        codes = [r.status_code for r in results]
+        assert codes.count(202) == 1 and codes.count(429) == 39, codes
+        await c.post(f"/api/runs/{next(r.json()['id'] for r in results if r.status_code == 202)}/cancel")
+    with sf() as db:
+        assert db.query(AuditRun).filter(AuditRun.status == RunStatus.queued).count() == 0
+
+
+def test_closed_event_streams_do_not_leak_subscriptions_over_real_tcp(tmp_path):
+    """httpx's in-process ASGI transport buffers whole responses, so a never-ending SSE stream can only be tested
+    honestly against a real server with real connections that really close."""
+    import sys
+
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    from auditor.db import Base
+    from auditor.reprove.devserver import dev_server, free_port
+    from auditor.seed import seed_criteria
+
+    db_file = tmp_path / "s.db"
+    engine = create_engine(f"sqlite:///{db_file}")
+    Base.metadata.create_all(engine)
+    local = sessionmaker(engine)
+    with local() as db:
+        seed_criteria(db)
+        rid = _run(db, RunStatus.detecting, beat_ago=timedelta(seconds=1))  # a live, never-ending run
+    port = free_port()
+    env = {"DATABASE_URL": f"sqlite:///{db_file}", "EVIDENCE_DIR": str(tmp_path / "ev"), "API_TOKEN": "tok-123456789"}
+    cmd = f"{sys.executable} -m uvicorn auditor.main:create_app --factory --host 127.0.0.1 --port {port}"
+    h = {"Authorization": "Bearer tok-123456789"}
+    with dev_server(tmp_path, cmd, port=port, env=env) as base:
+        # Heartbeats keep the fixture run "live" so the stream stays open; refresh it while we connect and disconnect.
+        for i in range(40):
+            with local() as db:
+                db.get(AuditRun, rid).heartbeat_at = datetime.now(UTC)
+                db.commit()
+            with httpx.stream("GET", f"{base}/api/runs/{rid}/events", headers=h, timeout=10) as r:
+                assert r.status_code == 200
+                for _ in r.iter_raw():
+                    break  # take the first bytes, then walk away without finishing the stream
+        for _ in range(60):  # give the server a moment to notice the closed sockets
+            subs = httpx.get(f"{base}/api/status", headers=h, timeout=10).json()["event_subscribers"]
+            if subs == 0:
+                break
+            import time
+            time.sleep(0.25)
+        assert subs == 0, f"{subs} event subscriptions leaked after 40 abandoned streams"
+        assert httpx.get(f"{base}/api/health", timeout=10).status_code == 200  # and the server still answers

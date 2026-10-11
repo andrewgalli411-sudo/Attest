@@ -13,6 +13,7 @@ from auditor.models import (
     FixAttempt,
     FixJournal,
     PageScore,
+    PageState,
     RegressionCheck,
     ReproveResult,
     RunEvent,
@@ -218,3 +219,45 @@ async def test_dirty_repo_is_refused(sf, tmp_path, demo_repo):
 
 def test_provider_is_local_git():
     assert LocalGitProvider.__name__ == "LocalGitProvider"
+
+
+async def test_one_page_failing_does_not_take_the_other_pages_down(sf, tmp_path, demo_repo, monkeypatch):
+    from auditor import remediate as remediate_mod
+
+    real = remediate_mod.detect_state
+
+    async def flaky(browser, url, **kw):
+        if url.endswith("/second"):
+            raise RuntimeError("the renderer crashed on this page")
+        return await real(browser, url, **kw)
+
+    monkeypatch.setattr(remediate_mod, "detect_state", flaky)
+    repo, _ = demo_repo
+    rid, summary, _ = await remediate(sf, tmp_path, repo, pages=[{"path": "/", "label": "profile"}, {"path": "/second", "label": "second"}])
+    assert summary["proved"] == 2 and summary["regressions"] == 0  # the good page was fully processed
+    with sf() as db:
+        states = {p.state_label: p for p in db.scalars(select(PageState).where(PageState.run_id == rid))}
+        assert states["profile"].status == "probed" and states["second"].status == "error"
+        assert "renderer crashed" in states["second"].status_detail
+        assert db.scalar(select(func.count()).select_from(PageState).where(PageState.run_id == rid)) == 2  # no duplicate rows
+        assert db.get(AuditRun, rid).status == RunStatus.complete
+
+
+async def test_if_every_page_fails_the_run_fails_loudly_instead_of_reporting_nothing_found(sf, tmp_path, demo_repo, monkeypatch):
+    from auditor import remediate
+
+    async def broken(*a, **k):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(remediate, "detect_state", broken)
+    repo, base_sha = demo_repo
+    with sf() as db:
+        run = AuditRun(target_url="demo")
+        db.add(run)
+        db.commit()
+        rid = run.id
+    with pytest.raises(RuntimeError, match="no page could be audited"):
+        await run_remediation(rid, sf, EvidenceStore(tmp_path / "ev"), EventBus(sf), ScriptedClient(), cfg_for(repo))
+    with sf() as db:
+        assert db.get(AuditRun, rid).status == RunStatus.failed  # NOT "complete with 0 issues"
+    assert git(repo, "rev-parse", "HEAD") == base_sha and git(repo, "status", "--porcelain") == ""

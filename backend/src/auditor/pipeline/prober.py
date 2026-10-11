@@ -5,6 +5,7 @@ import json
 import logging
 
 from playwright.async_api import Browser, async_playwright
+from playwright.async_api import Error as PlaywrightError
 
 from .axe_runner import run_axe
 from .flows import replay_steps
@@ -56,7 +57,10 @@ async def _open(
         await apply_auth(ctx, auth, url)
         page = await ctx.new_page()
         page.set_default_timeout(NAV_TIMEOUT_MS)
-        resp = await page.goto(url, wait_until="load")
+        try:
+            resp = await page.goto(url, wait_until="load")
+        except PlaywrightError as e:
+            raise PageUnauditable(f"navigation failed: {str(e).splitlines()[0][:200]}") from e
         try:  # let client-side redirects / late scripts settle so we audit the final page
             await page.wait_for_load_state("networkidle", timeout=SETTLE_MS)
         except Exception:
@@ -94,8 +98,11 @@ async def _capture(page) -> dict[str, bytes]:
         tree = await cdp.send("Accessibility.getFullAXTree")
     finally:
         await cdp.detach()
+    from ..findings.detect import page_is_screenshot_safe
+
+    safe = await page_is_screenshot_safe(page)
     return {
-        "screenshot.png": await page.screenshot(full_page=True, animations="disabled"),
+        "screenshot.png": await page.screenshot(full_page=safe, animations="disabled"),
         "dom.html": (await page.content()).encode(),
         "ax.json": json.dumps(tree, sort_keys=True).encode(),
     }

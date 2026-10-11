@@ -7,6 +7,7 @@ import subprocess
 from pathlib import Path
 
 from ..disclaimers import contains_banned_claim
+from ..gitsafe import git_cmd, git_env
 from .base import PushNotAllowed, RepoError
 
 BOT_NAME, BOT_EMAIL = "a11y-bot", "a11y-bot@users.noreply.invalid"
@@ -20,7 +21,8 @@ class LocalGitProvider:
 
     # ---- plumbing
     def _run(self, *args: str, binary: str | None = None, check: bool = True) -> str:
-        r = subprocess.run([binary or self.git, *args], cwd=self.path, capture_output=True, text=True, check=False)
+        cmd = [binary, *args] if binary else git_cmd(*args, git=self.git)  # git: hooks/fsmonitor/ext-diff disabled
+        r = subprocess.run(cmd, cwd=self.path, capture_output=True, text=True, check=False, env=git_env())
         if check and r.returncode != 0:
             raise RepoError(f"{' '.join([binary or self.git, *args])} failed ({r.returncode}): {r.stderr.strip()[:500]}")
         return r.stdout.strip()
@@ -49,7 +51,7 @@ class LocalGitProvider:
         return self._run("rev-parse", "--verify", "--quiet", f"refs/heads/{name}", check=False) != ""
 
     def show_diff(self, sha: str) -> str:
-        return self._run("show", "--no-color", "--format=", sha)
+        return self._run("show", "--no-color", "--no-ext-diff", "--format=", sha)
 
     def delete_branch(self, name: str) -> None:
         """Only ever deletes branches this tool created."""

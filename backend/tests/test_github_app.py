@@ -134,7 +134,8 @@ def test_https_push_sends_token_via_env_header_not_argv(tmp_path, keys, monkeypa
     p.push("a11y/x")
     token = p.auth.token()
     assert token not in " ".join(seen["argv"]) and all("x-access-token" not in a for a in seen["argv"])
-    assert seen["argv"][:3] == ["git", "push", f"https://github.com/{REPO}.git"]
+    assert seen["argv"][0] == "git" and "core.hooksPath=/dev/null" in seen["argv"]
+    assert seen["argv"][-2:] == [f"https://github.com/{REPO}.git", "a11y/x:refs/heads/a11y/x"] and "push" in seen["argv"]
     assert seen["env"]["GIT_CONFIG_KEY_0"] == "http.https://github.com/.extraheader"
     assert seen["env"]["GIT_CONFIG_VALUE_0"].startswith("AUTHORIZATION: basic ") and seen["env"]["GIT_TERMINAL_PROMPT"] == "0"
 

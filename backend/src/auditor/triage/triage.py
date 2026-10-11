@@ -11,9 +11,11 @@ import logging
 from sqlalchemy import select
 from sqlalchemy.orm import sessionmaker
 
+from ..budget import BudgetExceeded
 from ..models import Finding, FindingEvidence, FindingLocator, FindingStatus, Tier, TriageVerdict
 from ..privacy import redact, redact_json
 from ..storage.evidence_store import EvidenceStore
+from ..textsafe import strip_nul
 from .gate import apply_gate
 from .prompt import PROMPT_VERSION, SYSTEM_PROMPT
 from .schema import OUTPUT_SCHEMA, RULE_HELP
@@ -79,8 +81,11 @@ async def triage_one(
         by_kind = {e.kind: e for e in evs}
         snippet = (by_kind["dom_snippet"].payload or {}).get("html", "") if "dom_snippet" in by_kind else ""
         detail = (by_kind["detector_detail"].payload or {}) if "detector_detail" in by_kind else {}
+        # If the element could not be located at all, its own locator says why (e.g. inside an iframe); use that
+        # even when the source-mapping stage did not run, so the person always sees the real reason.
+        own_reason = (loc.fingerprint or {}).get("reason") if (loc.fingerprint or {}).get("unlocatable") else None
         source = (by_kind["source_hit"].payload or {}) if "source_hit" in by_kind else {
-            "unique": False, "reason": "source mapping was not run"}
+            "unique": False, "reason": own_reason or "source mapping was not run"}
         clip_ref = by_kind["shot_clip"].blob_ref if "shot_clip" in by_kind else None
         rule_id, stable = f.rule_id, f.baseline_stable
         fp = loc.fingerprint
@@ -99,7 +104,12 @@ async def triage_one(
 
     out, usage, note, gate = None, None, "", None
     for attempt in range(2):
-        out, usage, note = await call_model(client, model, items, image)
+        try:
+            out, usage, note = await call_model(client, model, items, image)
+        except BudgetExceeded as e:
+            return _record(sf, finding_id, "needs_human", "other", "", 0.0, [], [f"not triaged: {e}"], False, model, h, None, None, None)
+        except Exception as e:  # noqa: BLE001 - after the SDK's own retries; degrade this finding, keep the run alive
+            return _record(sf, finding_id, "needs_human", "other", "", 0.0, [], [f"not triaged: model error {type(e).__name__}"], False, model, h, None, None, None)
         if out is None:
             continue
         gate = apply_gate(rule_id=rule_id, model_out=out, evidence_ids=ids, baseline_stable=stable,
@@ -116,6 +126,7 @@ async def triage_one(
 
 
 def _record(sf, finding_id, tier, reason, plan, conf, cited, notes, valid, model, h, usage, impact, pr_tier):
+    plan, impact, notes, cited = strip_nul(plan), strip_nul(impact), strip_nul(notes), strip_nul(cited)
     with sf() as db:
         v = TriageVerdict(finding_id=finding_id, tier=Tier(tier), reason_code=reason, pr_tier=pr_tier,
                           fix_plan=plan or "",
