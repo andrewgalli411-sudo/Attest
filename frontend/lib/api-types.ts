@@ -146,6 +146,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/github/repos": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Repos
+         * @description The repositories this person can reach through an installation of the Attest GitHub App.
+         */
+        get: operations["list_repos_api_github_repos_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/health": {
         parameters: {
             query?: never;
@@ -178,6 +198,43 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/api/projects": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Projects */
+        get: operations["list_projects_api_projects_get"];
+        put?: never;
+        /** Create Project */
+        post: operations["create_project_api_projects_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read Project */
+        get: operations["read_project_api_projects__project_id__get"];
+        put?: never;
+        post?: never;
+        /** Delete Project */
+        delete: operations["delete_project_api_projects__project_id__delete"];
+        options?: never;
+        head?: never;
+        /** Update Project */
+        patch: operations["update_project_api_projects__project_id__patch"];
         trace?: never;
     };
     "/api/runs": {
@@ -537,6 +594,16 @@ export interface components {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
         };
+        /**
+         * LoginCookie
+         * @description A cookie that signs Attest in to the site under test (a dev or test account, never a real person's).
+         */
+        LoginCookie: {
+            /** Name */
+            name: string;
+            /** Value */
+            value: string;
+        };
         /** Me */
         Me: {
             /** Avatar Url */
@@ -571,6 +638,31 @@ export interface components {
             /** Path */
             path: string;
         };
+        /** ProjectIn */
+        ProjectIn: {
+            /**
+             * Allow Pr
+             * @default false
+             */
+            allow_pr: boolean;
+            /**
+             * Github Repo
+             * @description owner/name
+             */
+            github_repo: string;
+            /** Installation Id */
+            installation_id: number;
+            /** Login Cookies */
+            login_cookies?: components["schemas"]["LoginCookie"][] | null;
+            /** Name */
+            name?: string | null;
+            /** Pages */
+            pages?: components["schemas"]["PageSpec"][] | null;
+            /** Preview Url Template */
+            preview_url_template?: string | null;
+            /** Site Url */
+            site_url: string;
+        };
         /** ProjectInfo */
         ProjectInfo: {
             /**
@@ -580,12 +672,73 @@ export interface components {
             base_branch: string;
             /** Can Publish */
             can_publish: boolean;
+            /** Github Repo */
+            github_repo?: string | null;
+            /** Id */
+            id?: string | null;
             /** Name */
             name: string;
             /** Pages */
             pages: {
                 [key: string]: unknown;
             }[];
+            /** Site Url */
+            site_url?: string | null;
+            /** Verified */
+            verified?: boolean | null;
+        };
+        /** ProjectOut */
+        ProjectOut: {
+            /** Allow Pr */
+            allow_pr: boolean;
+            /** Created At */
+            created_at: string;
+            /** Default Branch */
+            default_branch: string;
+            /** Github Repo */
+            github_repo: string;
+            /** Has Login */
+            has_login: boolean;
+            /** Id */
+            id: string;
+            /**
+             * Login Cookie Names
+             * @description names only; values are never returned
+             */
+            login_cookie_names?: string[];
+            /** Name */
+            name: string;
+            /** Pages */
+            pages: {
+                [key: string]: unknown;
+            }[];
+            /** Preview Url Template */
+            preview_url_template?: string | null;
+            /** Site Url */
+            site_url: string;
+            verification: components["schemas"]["VerificationHelp"];
+            /** Verified */
+            verified: boolean;
+            /** Verified At */
+            verified_at?: string | null;
+        };
+        /** ProjectPatch */
+        ProjectPatch: {
+            /** Allow Pr */
+            allow_pr?: boolean | null;
+            /**
+             * Login Cookies
+             * @description [] removes the login; omit to keep it
+             */
+            login_cookies?: components["schemas"]["LoginCookie"][] | null;
+            /** Name */
+            name?: string | null;
+            /** Pages */
+            pages?: components["schemas"]["PageSpec"][] | null;
+            /** Preview Url Template */
+            preview_url_template?: string | null;
+            /** Site Url */
+            site_url?: string | null;
         };
         /** ProofOut */
         ProofOut: {
@@ -699,6 +852,31 @@ export interface components {
             rules_checked: number;
             /** Verdict */
             verdict: string;
+        };
+        /** RepoOut */
+        RepoOut: {
+            /**
+             * Attached
+             * @default false
+             */
+            attached: boolean;
+            /** Default Branch */
+            default_branch: string;
+            /** Full Name */
+            full_name: string;
+            /** Homepage */
+            homepage?: string | null;
+            /** Installation Id */
+            installation_id: number;
+            /** Private */
+            private: boolean;
+        };
+        /** ReposOut */
+        ReposOut: {
+            /** Install Url */
+            install_url?: string | null;
+            /** Repos */
+            repos: components["schemas"]["RepoOut"][];
         };
         /** RunMeta */
         RunMeta: {
@@ -900,6 +1078,17 @@ export interface components {
             msg: string;
             /** Error Type */
             type: string;
+        };
+        /** VerificationHelp */
+        VerificationHelp: {
+            /** Dns Name */
+            dns_name: string;
+            /** Dns Value */
+            dns_value: string;
+            /** File Contents */
+            file_contents: string;
+            /** File Path */
+            file_path: string;
         };
     };
     responses: never;
@@ -1416,6 +1605,26 @@ export interface operations {
             };
         };
     };
+    list_repos_api_github_repos_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReposOut"];
+                };
+            };
+        };
+    };
     health_api_health_get: {
         parameters: {
             query?: never;
@@ -1452,6 +1661,154 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Me"];
+                };
+            };
+        };
+    };
+    list_projects_api_projects_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectOut"][];
+                };
+            };
+        };
+    };
+    create_project_api_projects_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProjectIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    read_project_api_projects__project_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_project_api_projects__project_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_project_api_projects__project_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProjectPatch"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

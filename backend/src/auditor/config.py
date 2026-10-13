@@ -32,6 +32,11 @@ class Settings(BaseSettings):
     github_client_id: str = ""
     github_client_secret: str = ""
     github_webhook_secret: str = ""
+    github_app_slug: str = ""  # the App's URL name, for the "install on your repositories" link
+    max_projects_per_account: int = 20
+    # Which sites an account may attach. https on 443 only, unless the operator widens it (development and tests).
+    allow_insecure_sites: bool = False
+    allowed_site_ports: list[int] = [443]
     github_web_base: str = "https://github.com"
     github_api_base: str = "https://api.github.com"
 

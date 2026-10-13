@@ -627,6 +627,27 @@
         "title": "HTTPValidationError",
         "type": "object"
       },
+      "LoginCookie": {
+        "description": "A cookie that signs Attest in to the site under test (a dev or test account, never a real person's).",
+        "properties": {
+          "name": {
+            "pattern": "^[A-Za-z0-9!#$%&'*+.^_`|~-]{1,100}$",
+            "title": "Name",
+            "type": "string"
+          },
+          "value": {
+            "maxLength": 4096,
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "value"
+        ],
+        "title": "LoginCookie",
+        "type": "object"
+      },
       "Me": {
         "properties": {
           "avatar_url": {
@@ -739,6 +760,93 @@
         "title": "PageSpec",
         "type": "object"
       },
+      "ProjectIn": {
+        "properties": {
+          "allow_pr": {
+            "default": false,
+            "title": "Allow Pr",
+            "type": "boolean"
+          },
+          "github_repo": {
+            "description": "owner/name",
+            "pattern": "^[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}$",
+            "title": "Github Repo",
+            "type": "string"
+          },
+          "installation_id": {
+            "minimum": 1.0,
+            "title": "Installation Id",
+            "type": "integer"
+          },
+          "login_cookies": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/LoginCookie"
+                },
+                "maxItems": 5,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Login Cookies"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 60,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "pages": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/PageSpec"
+                },
+                "maxItems": 25,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pages"
+          },
+          "preview_url_template": {
+            "anyOf": [
+              {
+                "maxLength": 300,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Preview Url Template"
+          },
+          "site_url": {
+            "maxLength": 300,
+            "title": "Site Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "github_repo",
+          "installation_id",
+          "site_url"
+        ],
+        "title": "ProjectIn",
+        "type": "object"
+      },
       "ProjectInfo": {
         "properties": {
           "base_branch": {
@@ -749,6 +857,28 @@
           "can_publish": {
             "title": "Can Publish",
             "type": "boolean"
+          },
+          "github_repo": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Github Repo"
+          },
+          "id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
           },
           "name": {
             "title": "Name",
@@ -761,6 +891,28 @@
             },
             "title": "Pages",
             "type": "array"
+          },
+          "site_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Site Url"
+          },
+          "verified": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verified"
           }
         },
         "required": [
@@ -769,6 +921,187 @@
           "can_publish"
         ],
         "title": "ProjectInfo",
+        "type": "object"
+      },
+      "ProjectOut": {
+        "properties": {
+          "allow_pr": {
+            "title": "Allow Pr",
+            "type": "boolean"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "default_branch": {
+            "title": "Default Branch",
+            "type": "string"
+          },
+          "github_repo": {
+            "title": "Github Repo",
+            "type": "string"
+          },
+          "has_login": {
+            "title": "Has Login",
+            "type": "boolean"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "login_cookie_names": {
+            "description": "names only; values are never returned",
+            "items": {
+              "type": "string"
+            },
+            "title": "Login Cookie Names",
+            "type": "array"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "pages": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Pages",
+            "type": "array"
+          },
+          "preview_url_template": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Preview Url Template"
+          },
+          "site_url": {
+            "title": "Site Url",
+            "type": "string"
+          },
+          "verification": {
+            "$ref": "#/components/schemas/VerificationHelp"
+          },
+          "verified": {
+            "title": "Verified",
+            "type": "boolean"
+          },
+          "verified_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verified At"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "github_repo",
+          "default_branch",
+          "site_url",
+          "pages",
+          "has_login",
+          "allow_pr",
+          "verified",
+          "verification",
+          "created_at"
+        ],
+        "title": "ProjectOut",
+        "type": "object"
+      },
+      "ProjectPatch": {
+        "properties": {
+          "allow_pr": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Allow Pr"
+          },
+          "login_cookies": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/LoginCookie"
+                },
+                "maxItems": 5,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "[] removes the login; omit to keep it",
+            "title": "Login Cookies"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 60,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "pages": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/PageSpec"
+                },
+                "maxItems": 25,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pages"
+          },
+          "preview_url_template": {
+            "anyOf": [
+              {
+                "maxLength": 300,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Preview Url Template"
+          },
+          "site_url": {
+            "anyOf": [
+              {
+                "maxLength": 300,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Site Url"
+          }
+        },
+        "title": "ProjectPatch",
         "type": "object"
       },
       "ProofOut": {
@@ -1060,6 +1393,77 @@
           "rules_checked"
         ],
         "title": "RegressionOut",
+        "type": "object"
+      },
+      "RepoOut": {
+        "properties": {
+          "attached": {
+            "default": false,
+            "title": "Attached",
+            "type": "boolean"
+          },
+          "default_branch": {
+            "title": "Default Branch",
+            "type": "string"
+          },
+          "full_name": {
+            "title": "Full Name",
+            "type": "string"
+          },
+          "homepage": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Homepage"
+          },
+          "installation_id": {
+            "title": "Installation Id",
+            "type": "integer"
+          },
+          "private": {
+            "title": "Private",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "installation_id",
+          "full_name",
+          "default_branch",
+          "private"
+        ],
+        "title": "RepoOut",
+        "type": "object"
+      },
+      "ReposOut": {
+        "properties": {
+          "install_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Install Url"
+          },
+          "repos": {
+            "items": {
+              "$ref": "#/components/schemas/RepoOut"
+            },
+            "title": "Repos",
+            "type": "array"
+          }
+        },
+        "required": [
+          "repos"
+        ],
+        "title": "ReposOut",
         "type": "object"
       },
       "RunMeta": {
@@ -1631,6 +2035,34 @@
           "type"
         ],
         "title": "ValidationError",
+        "type": "object"
+      },
+      "VerificationHelp": {
+        "properties": {
+          "dns_name": {
+            "title": "Dns Name",
+            "type": "string"
+          },
+          "dns_value": {
+            "title": "Dns Value",
+            "type": "string"
+          },
+          "file_contents": {
+            "title": "File Contents",
+            "type": "string"
+          },
+          "file_path": {
+            "title": "File Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file_path",
+          "file_contents",
+          "dns_name",
+          "dns_value"
+        ],
+        "title": "VerificationHelp",
         "type": "object"
       }
     }
@@ -2231,6 +2663,25 @@
         "summary": "Decide"
       }
     },
+    "/api/github/repos": {
+      "get": {
+        "description": "The repositories this person can reach through an installation of the Attest GitHub App.",
+        "operationId": "list_repos_api_github_repos_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReposOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Repos"
+      }
+    },
     "/api/health": {
       "get": {
         "operationId": "health_api_health_get",
@@ -2263,6 +2714,180 @@
           }
         },
         "summary": "Me"
+      }
+    },
+    "/api/projects": {
+      "get": {
+        "operationId": "list_projects_api_projects_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ProjectOut"
+                  },
+                  "title": "Response List Projects Api Projects Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Projects"
+      },
+      "post": {
+        "operationId": "create_project_api_projects_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProjectIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Project"
+      }
+    },
+    "/api/projects/{project_id}": {
+      "delete": {
+        "operationId": "delete_project_api_projects__project_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Project"
+      },
+      "get": {
+        "operationId": "read_project_api_projects__project_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Read Project"
+      },
+      "patch": {
+        "operationId": "update_project_api_projects__project_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProjectPatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Project"
       }
     },
     "/api/runs": {

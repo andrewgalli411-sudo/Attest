@@ -63,6 +63,11 @@ class ProjectInfo(BaseModel):
     pages: list[dict]
     can_publish: bool
     base_branch: str = "main"
+    # Set for projects stored in the database (accounts mode); absent for operator projects.
+    id: str | None = None
+    site_url: str | None = None
+    github_repo: str | None = None
+    verified: bool | None = None
 
 
 class SettingsOut(BaseModel):
@@ -295,3 +300,76 @@ class PublishedPr(BaseModel):
 class PublishOut(BaseModel):
     opened: list[PublishedPr]
     errors: list[str] = Field(default_factory=list)
+
+
+# ------------------------------------------------------------------------------------------ projects (accounts mode)
+class LoginCookie(BaseModel):
+    """A cookie that signs Attest in to the site under test (a dev or test account, never a real person's)."""
+
+    name: str = Field(pattern=r"^[A-Za-z0-9!#$%&'*+.^_`|~-]{1,100}$")
+    value: str = Field(max_length=4096)
+
+    @field_validator("value")
+    @classmethod
+    def _no_controls(cls, v: str) -> str:
+        if any(ord(c) < 32 or ord(c) == 127 for c in v) or ";" in v:
+            raise ValueError("a cookie value cannot contain control characters or ';'")
+        return v
+
+
+class ProjectIn(BaseModel):
+    github_repo: str = Field(pattern=r"^[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}$", description="owner/name")
+    installation_id: int = Field(ge=1)
+    site_url: str = Field(max_length=300)
+    name: str | None = Field(None, min_length=1, max_length=60)
+    pages: list[PageSpec] | None = Field(None, max_length=25)
+    preview_url_template: str | None = Field(None, max_length=300)
+    login_cookies: list[LoginCookie] | None = Field(None, max_length=5)
+    allow_pr: bool = False
+
+
+class ProjectPatch(BaseModel):
+    name: str | None = Field(None, min_length=1, max_length=60)
+    site_url: str | None = Field(None, max_length=300)
+    pages: list[PageSpec] | None = Field(None, max_length=25)
+    preview_url_template: str | None = Field(None, max_length=300)
+    login_cookies: list[LoginCookie] | None = Field(None, max_length=5, description="[] removes the login; omit to keep it")
+    allow_pr: bool | None = None
+
+
+class VerificationHelp(BaseModel):
+    file_path: str
+    file_contents: str
+    dns_name: str
+    dns_value: str
+
+
+class ProjectOut(BaseModel):
+    id: str
+    name: str
+    github_repo: str
+    default_branch: str
+    site_url: str
+    preview_url_template: str | None = None
+    pages: list[dict]
+    has_login: bool
+    login_cookie_names: list[str] = Field(default_factory=list, description="names only; values are never returned")
+    allow_pr: bool
+    verified: bool
+    verified_at: str | None = None
+    verification: VerificationHelp
+    created_at: str
+
+
+class RepoOut(BaseModel):
+    installation_id: int
+    full_name: str
+    default_branch: str
+    private: bool
+    homepage: str | None = None
+    attached: bool = False
+
+
+class ReposOut(BaseModel):
+    install_url: str | None = None
+    repos: list[RepoOut]

@@ -14,6 +14,7 @@ from sqlalchemy.orm import sessionmaker
 
 from .api.accounts import router as accounts_router
 from .api.middleware import SecurityMiddleware
+from .api.projects import router as projects_router
 from .api.routes import TERMINAL, router
 from .config import Settings
 from .config import settings as default_settings
@@ -179,6 +180,7 @@ def create_app(sf: sessionmaker | None = None, *, store: EvidenceStore | None = 
                           client_factory=client_factory or (lambda: default_client(cfg)),
                           work_dir=work_dir or cfg.evidence_dir, cfg=cfg, projects=projects, vault=vault)
     app.include_router(accounts_router)
+    app.include_router(projects_router)
     app.include_router(router)
 
     @app.get("/api/health")

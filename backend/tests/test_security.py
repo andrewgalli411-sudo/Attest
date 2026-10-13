@@ -132,8 +132,11 @@ async def test_config_endpoint_never_leaks_paths_commands_or_secrets(sf, tmp_pat
     async with http(app, Authorization=f"Bearer {canary}") as c:
         r = await c.get("/api/config")
         text = r.text
-        assert r.json()["projects"] == [{"name": "web", "pages": [{"path": "/", "label": "profile"}], "can_publish": False,
-                                         "base_branch": "main"}]
+        (proj,) = r.json()["projects"]
+        # An explicit allow-list: a new field has to be added here on purpose, after asking "could this leak a path or secret?"
+        assert set(proj) == {"name", "pages", "can_publish", "base_branch", "id", "site_url", "github_repo", "verified"}
+        assert (proj["name"], proj["pages"], proj["can_publish"], proj["base_branch"]) == ("web", [{"path": "/", "label": "profile"}], False, "main")
+        assert (proj["id"], proj["site_url"], proj["github_repo"], proj["verified"]) == (None, None, None, None)  # operator projects have none
         assert r.json()["auth_required"] is True
         for leaked in (SECRET, str(repo), "pnpm", "demo_session", canary):
             assert leaked not in text, leaked

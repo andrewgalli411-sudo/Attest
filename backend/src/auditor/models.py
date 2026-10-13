@@ -95,11 +95,34 @@ class UserSession(Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
+class ProjectRecord(Base):
+    """A site a person attached: a GitHub repository (read and changed through the Attest GitHub App, never cloned and
+    run on our servers) plus the live address Attest audits in a browser."""
+
+    __tablename__ = "project"
+    __table_args__ = (UniqueConstraint("owner_id", "name"),)
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_id)
+    owner_id: Mapped[str] = mapped_column(ForeignKey("account.id"), index=True)
+    name: Mapped[str] = mapped_column(String(100))
+    github_repo: Mapped[str] = mapped_column(String(200))  # "owner/name"
+    installation_id: Mapped[int] = mapped_column(Integer)
+    default_branch: Mapped[str] = mapped_column(String(100), default="main")
+    site_url: Mapped[str] = mapped_column(Text)  # normalised origin (+ optional base path), https
+    preview_url_template: Mapped[str | None] = mapped_column(Text, nullable=True)
+    pages: Mapped[list] = mapped_column(JSON, default=list)  # [{"path": "/", "label": "home"}]
+    sealed_auth: Mapped[str | None] = mapped_column(Text, nullable=True)  # encrypted {"cookies": [...]}; never returned
+    allow_pr: Mapped[bool] = mapped_column(default=False)  # may Attest open pull requests on this repository?
+    verification_token: Mapped[str] = mapped_column(String(64))
+    verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
 class AuditRun(Base):
     __tablename__ = "audit_run"
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_id)
     # None only in local mode (one implicit owner). In accounts mode every run has an owner.
     owner_id: Mapped[str | None] = mapped_column(ForeignKey("account.id"), nullable=True, index=True)
+    project_id: Mapped[str | None] = mapped_column(ForeignKey("project.id"), nullable=True, index=True)
     target_url: Mapped[str] = mapped_column(Text)
     auth_config: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     flows: Mapped[list | None] = mapped_column(JSON, nullable=True)

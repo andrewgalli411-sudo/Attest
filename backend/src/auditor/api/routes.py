@@ -23,6 +23,7 @@ from ..models import (
     HumanDecision,
     PageScore,
     PageState,
+    ProjectRecord,
     RegressionCheck,
     ReproveResult,
     RunEvent,
@@ -117,12 +118,20 @@ def status(d=Depends(deps), who: Principal = Depends(require_auth)):
 
 
 @router.get("/config", response_model=ConfigOut)
-def get_config(d=Depends(deps)):
+def get_config(d=Depends(deps), who: Principal = Depends(require_auth)):
     """What this server will let a caller do. Never includes commands, paths, or secrets."""
+    if who.is_local:
+        projects = [ProjectInfo(name=n, pages=p.pages, can_publish=p.allow_push, base_branch=p.base_branch)
+                    for n, p in sorted(d.projects.items())]
+    else:  # accounts mode: the projects this person attached, and only theirs
+        with d.sf() as db:
+            projects = [ProjectInfo(name=p.name, pages=p.pages, can_publish=p.allow_pr, base_branch=p.default_branch, id=p.id,
+                                    site_url=p.site_url, github_repo=p.github_repo, verified=p.verified_at is not None)
+                        for p in db.scalars(select(ProjectRecord).where(ProjectRecord.owner_id == who.account_id)
+                                            .order_by(ProjectRecord.created_at))]
     return ConfigOut(
         demo_enabled=d.cfg.demo_enabled, allow_custom_runs=d.cfg.allow_custom_runs, auth_required=bool(d.cfg.api_token),
-        projects=[ProjectInfo(name=n, pages=p.pages, can_publish=p.allow_push, base_branch=p.base_branch)
-                  for n, p in sorted(d.projects.items())],
+        projects=projects,
         settings=SettingsOut(
             triage_model=d.cfg.triage_model, fix_model=d.cfg.fix_model, model_token_budget=d.cfg.model_token_budget,
             refusal_fallback=d.cfg.refusal_fallback, send_screenshots_to_model=d.cfg.send_screenshots_to_model,
