@@ -27,6 +27,14 @@ text, and the report. Fixed UI wording is reviewed by hand.**
   only on the bundled demo app (3 findings); the regular test suite uses a deterministic stand-in, and the
   opt-in live tests need `A11Y_LIVE=1`. Run it on a non-critical repo first and review every pull request.
 
+## The web app
+Six screens: Runs, a run's dashboard (live pipeline, findings by WCAG criterion), Finding review (evidence timeline,
+accept/reject with `J`/`K`/`A`/`R`), Pull requests (publish what was accepted), Reports (print or save as PDF through
+the browser), and Settings. **Settings is read-only**: the model, budget, limits and projects are set by the operator in
+the server's environment and `projects.json`, and old run data is removed with `python -m auditor.purge`. The browser
+can never change server behaviour or delete data. The UI is built to the Attest design handoff; where the design's
+muted greys failed contrast on text (diff line numbers) the accessible grey is used, because the product audits this.
+
 ## Deploy
 ```
 cp .env.example .env            # fill in POSTGRES_PASSWORD, API_TOKEN, REPOS_DIR, ANTHROPIC_API_KEY
@@ -49,7 +57,13 @@ to fix small things on first build. Without Docker: `uv run alembic upgrade head
   Svelte/Angular bindings), URLs, code-execution constructs, and invisible/bidi characters are rejected. A rule
   with no policy cannot be auto-fixed. Edits must also stay in one file, pass your build, and are merged by a person.
 - **Nothing is published by default.** Pushing branches and opening PRs/issues requires the project to set
-  `allow_push` *and* the run to request `publish`. Published text is filtered for compliance claims.
+  `allow_push`. Published text is filtered for compliance claims, and any quoted text that contains such a claim
+  (a hostile page, or a legitimate "Compliance" menu item in a diff) is withheld and flagged instead of aborting the run.
+- **Publishing after review** (Pull requests page, `POST /api/runs/{id}/publish`): only fixes that were proved, had no
+  regression, and that a person accepted are published, each cherry-picked onto a fresh `a11y/<run>-<tier>-<hash>`
+  branch cut from the run's base commit (a tier branch also holds the fixes nobody accepted, so it is never pushed as is).
+  It refuses on a dirty working tree, while any run is active, for demo runs, and for projects without `allow_push`;
+  it is idempotent (the same set of fixes reuses its branch and PR) and always restores your branch afterwards.
 - **Page inputs are validated.** A page is a *path* (`/dashboard`), never a URL: a path that could change the host
   (`@evil.example/`, `//evil.example`, `http://...`, `..`, backslashes) is rejected, and the run re-checks that every
   navigation stays on the audited app's origin.

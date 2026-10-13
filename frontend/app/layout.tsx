@@ -1,37 +1,33 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
-import Link from "next/link";
+import localFont from "next/font/local";
+import { Suspense } from "react";
 import "./globals.css";
-import { DraftBanner } from "@/components/ui";
+import { AppShell } from "@/components/shell/AppShell";
 
-const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
-const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"] });
+// Self-hosted (SIL OFL, see app/fonts/LICENSE.txt): builds and tests never depend on reaching Google Fonts.
+const plexSans = localFont({ src: "./fonts/ibm-plex-sans.woff2", variable: "--font-plex-sans", weight: "100 700", display: "swap" });
+const plexMono = localFont({
+  src: [
+    { path: "./fonts/ibm-plex-mono-400.woff2", weight: "400", style: "normal" },
+    { path: "./fonts/ibm-plex-mono-500.woff2", weight: "500", style: "normal" },
+  ],
+  variable: "--font-plex-mono",
+  display: "swap",
+});
 
 export const metadata: Metadata = {
-  title: "Accessibility Auditor",
+  title: { default: "Attest", template: "%s · Attest" },
   description: "Finds accessibility issues, proposes fixes as pull requests, and proves each fix with a re-test.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
-    <html lang="en" className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}>
-      <body className="min-h-full flex flex-col">
-        <a className="skip-link" href="#main">Skip to main content</a>
-        <header className="border-b border-line">
-          <div className="mx-auto max-w-5xl px-4 py-3 flex flex-wrap items-center gap-4">
-            <Link href="/" className="font-bold text-lg no-underline text-fg">Accessibility Auditor</Link>
-            <nav aria-label="Primary">
-              <Link href="/">Runs</Link>
-            </nav>
-          </div>
-          <div className="mx-auto max-w-5xl px-4 pb-3"><DraftBanner /></div>
-        </header>
-        <main id="main" tabIndex={-1} className="mx-auto w-full max-w-5xl px-4 py-6 flex-1">{children}</main>
-        <footer className="border-t border-line">
-          <p className="mx-auto max-w-5xl px-4 py-4 text-sm text-muted">
-            Automated first pass - requires expert review. Every change is a pull request for a person to review.
-          </p>
-        </footer>
+    <html lang="en" className={`${plexSans.variable} ${plexMono.variable} h-full`}>
+      <body className="min-h-full">
+        {/* The shell reads the URL, which can only happen at request time; the fallback keeps the page shell static. */}
+        <Suspense fallback={<p role="status" className="p-7 text-muted">Loading…</p>}>
+          <AppShell>{children}</AppShell>
+        </Suspense>
       </body>
     </html>
   );

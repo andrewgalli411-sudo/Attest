@@ -126,14 +126,16 @@ async def test_publish_only_if_the_operator_allowed_it_for_that_project(sf, tmp_
 
 
 async def test_config_endpoint_never_leaks_paths_commands_or_secrets(sf, tmp_path):
+    canary = "canary-7f3c9a1e5b"  # distinctive, so it cannot match a field name like model_token_budget
     repo, _ = prepare_demo_repo(tmp_path / "r", install=False)
-    app = make_app(sf, tmp_path, projects_file=write_projects(tmp_path, repo), api_token="tok")
-    async with http(app, Authorization="Bearer tok") as c:
+    app = make_app(sf, tmp_path, projects_file=write_projects(tmp_path, repo), api_token=canary)
+    async with http(app, Authorization=f"Bearer {canary}") as c:
         r = await c.get("/api/config")
         text = r.text
-        assert r.json()["projects"] == [{"name": "web", "pages": [{"path": "/", "label": "profile"}], "can_publish": False}]
+        assert r.json()["projects"] == [{"name": "web", "pages": [{"path": "/", "label": "profile"}], "can_publish": False,
+                                         "base_branch": "main"}]
         assert r.json()["auth_required"] is True
-        for leaked in (SECRET, str(repo), "pnpm", "demo_session", "tok"):
+        for leaked in (SECRET, str(repo), "pnpm", "demo_session", canary):
             assert leaked not in text, leaked
 
 

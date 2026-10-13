@@ -1,11 +1,12 @@
 import { Suspense } from "react";
-import FindingView from "./view";
+import { RedirectToFinding } from "@/components/RedirectToFinding";
 
+/** Old address of a finding. It now lives under its run, next to the list of that run's findings. */
 export default function Page(props: PageProps<"/findings/[id]">) {
   return (
-    <Suspense fallback={<p role="status">Loading finding...</p>}>
+    <Suspense fallback={<p role="status" className="p-7 text-muted">Loading finding…</p>}>
       {props.params.then(({ id }) => (
-        <FindingView id={id} />
+        <RedirectToFinding fid={id} />
       ))}
     </Suspense>
   );

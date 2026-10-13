@@ -82,6 +82,15 @@ class LocalGitProvider:
         self._run("-c", f"user.name={BOT_NAME}", "-c", f"user.email={BOT_EMAIL}", "commit", "-q", "-m", message)
         return self.head_sha()
 
+    def cherry_pick(self, sha: str) -> str:
+        """Apply one commit on top of the current branch; on conflict, leave the tree exactly as it was."""
+        r = subprocess.run(git_cmd("-c", f"user.name={BOT_NAME}", "-c", f"user.email={BOT_EMAIL}", "cherry-pick", sha,
+                                   git=self.git), cwd=self.path, capture_output=True, text=True, check=False, env=git_env())
+        if r.returncode != 0:
+            self._run("cherry-pick", "--abort", check=False)
+            raise RepoError(f"could not apply {sha[:10]} on its own: {(r.stderr or r.stdout).strip()[:300]}")
+        return self.head_sha()
+
     # ---- outward-facing (explicit opt-in)
     def push(self, branch: str) -> None:
         self._require_push("push")

@@ -62,6 +62,21 @@ class ProjectInfo(BaseModel):
     name: str
     pages: list[dict]
     can_publish: bool
+    base_branch: str = "main"
+
+
+class SettingsOut(BaseModel):
+    """Read-only view of how the operator configured this server. Never includes secrets, paths or commands."""
+
+    triage_model: str
+    fix_model: str
+    model_token_budget: int
+    refusal_fallback: bool
+    send_screenshots_to_model: bool
+    max_concurrent_runs: int
+    run_timeout_s: int
+    max_findings_per_page: int
+    model_configured: bool
 
 
 class ConfigOut(BaseModel):
@@ -69,6 +84,7 @@ class ConfigOut(BaseModel):
     allow_custom_runs: bool
     projects: list[ProjectInfo]
     auth_required: bool
+    settings: SettingsOut
 
 
 class RunOut(BaseModel):
@@ -77,6 +93,16 @@ class RunOut(BaseModel):
     target: str
     created_at: str
     headline: str | None = None
+    # Filled in from the stored run summary; absent while a run is still working or if it never got that far.
+    project: str | None = None
+    base_branch: str | None = None
+    page_count: int | None = None
+    score_before: int | None = None
+    score_after: int | None = None
+    findings: int | None = None
+    fixed: int | None = None
+    needs_human: int | None = None
+    result: str | None = Field(None, description="one line: the headline, or why the run failed or was cancelled")
 
 
 class FindingRow(BaseModel):
@@ -116,8 +142,30 @@ class Counts(BaseModel):
     regressions: int
 
 
+class StageOut(BaseModel):
+    key: str = Field(description="detect | triage | fix | prove | regress")
+    title: str
+    state: str = Field(description="done | current | waiting | stopped")
+    detail: str
+    seconds: float | None = None
+
+
+class RunMeta(BaseModel):
+    project: str | None = None
+    base_branch: str | None = None
+    base_sha: str | None = None
+    started_at: str
+    duration_s: float | None = None
+    page_count: int
+    publish: bool = False
+    model_tokens_used: int | None = None
+    model_token_budget: int | None = None
+
+
 class Dashboard(BaseModel):
     run: RunOut
+    meta: RunMeta
+    stages: list[StageOut]
     headline: str
     counts: Counts
     severity: dict[str, int]
@@ -191,6 +239,11 @@ class FindingDetail(BaseModel):
     regression: RegressionOut | None
     evidence: list[EvidenceOut]
     notice: str
+    selector: str | None = None
+    source: str | None = Field(None, description="file:line in the audited repo, when the element maps to exactly one place")
+    sc_titles: dict[str, str] = Field(default_factory=dict)
+    decision: str | None = Field(None, description="accept_pr | reject_pr: the latest decision a person recorded")
+    instances: int = 1
 
 
 class DecisionIn(BaseModel):
@@ -203,3 +256,42 @@ class DecisionOut(BaseModel):
     id: str
     finding_id: str
     action: str
+
+
+class PullRequestRow(BaseModel):
+    finding_id: str
+    rule_id: str
+    sc_ids: list[str]
+    severity: str
+    page: str
+    tier: str | None = None
+    branch: str
+    file: str | None = None
+    added: int = 0
+    removed: int = 0
+    proof: str = Field(description="proved | not_retested | fix_failed | regression")
+    decision: str = Field(description="awaiting | accepted | rejected | held_back")
+    remote: str = Field(description="open | server_only | not_publishable")
+    pr_url: str | None = None
+    pr_number: int | None = None
+
+
+class PullRequestsOut(BaseModel):
+    run_id: str
+    project: str | None = None
+    can_publish: bool = Field(description="the project allows publishing and this run is finished")
+    publishable: int = Field(description="accepted, proved fixes that are not on the remote yet")
+    published: int
+    rows: list[PullRequestRow]
+
+
+class PublishedPr(BaseModel):
+    tier: str
+    branch: str
+    url: str
+    fixes: int
+
+
+class PublishOut(BaseModel):
+    opened: list[PublishedPr]
+    errors: list[str] = Field(default_factory=list)

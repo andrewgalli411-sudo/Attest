@@ -18,18 +18,21 @@ from ..models import (
     Criterion,
     Finding,
     FindingEvidence,
+    FindingLocator,
     FixAttempt,
     HumanDecision,
     PageScore,
     PageState,
     RegressionCheck,
     ReproveResult,
+    RunEvent,
     RunStatus,
     TriageVerdict,
 )
 from ..remediate import RemediationConfig, run_remediation
 from ..report.html import run_report
 from .auth import require_auth
+from .publish import PublishRefused, publish_accepted
 from .schemas import (
     ConfigOut,
     Counts,
@@ -45,13 +48,17 @@ from .schemas import (
     PageOut,
     ProjectInfo,
     ProofOut,
+    PublishOut,
+    PullRequestsOut,
     RegressionOut,
     RunOut,
     ScoreOut,
+    SettingsOut,
     StartRun,
     StatusOut,
     TriageOut,
 )
+from .views import build_meta, build_pull_requests, build_stages
 
 router = APIRouter(prefix="/api", dependencies=[Depends(require_auth)], responses={
     code: {"model": ErrorOut, "description": why}
@@ -67,9 +74,37 @@ def deps(request: Request):
     return request.app.state.deps
 
 
-def _run_out(run: AuditRun) -> RunOut:
-    return RunOut(id=run.id, status=run.status.value, target=run.target_url, created_at=run.created_at.isoformat(),
-                  headline=(run.summary or {}).get("headline"))
+def _run_out(run: AuditRun, error: str | None = None) -> RunOut:
+    summary = run.summary or {}
+    cfg = run.config or {}
+    status = run.status.value
+    headline = summary.get("headline")
+    if headline:
+        result = headline
+    elif run.status == RunStatus.failed:
+        result = error or "The run failed."
+    elif run.status == RunStatus.cancelled:
+        result = "Cancelled. Nothing pushed, repo restored."
+    else:
+        result = None
+    sb, sa = summary.get("score_before") or {}, summary.get("score_after") or {}
+    return RunOut(
+        id=run.id, status=status, target=run.target_url, created_at=run.created_at.isoformat(), headline=headline,
+        project=run.target_url.removeprefix("project:") if run.target_url.startswith("project:") else
+        ("demo" if run.target_url == "demo" else None),
+        base_branch=cfg.get("base_branch"), page_count=len(cfg["pages"]) if cfg.get("pages") else None,
+        score_before=sb.get("score"), score_after=sa.get("score"), findings=summary.get("total_findings"), fixed=summary.get("proved"),
+        needs_human=summary.get("needs_human"), result=result)
+
+
+def _last_errors(db, run_ids: list[str]) -> dict[str, str]:
+    """The reason each given run failed: its latest 'error' event."""
+    out: dict[str, str] = {}
+    if not run_ids:
+        return out
+    for e in db.scalars(select(RunEvent).where(RunEvent.run_id.in_(run_ids), RunEvent.type == "error").order_by(RunEvent.seq)):
+        out[e.run_id] = str((e.payload or {}).get("error") or "")
+    return out
 
 
 @router.get("/status", response_model=StatusOut)
@@ -84,7 +119,13 @@ def get_config(d=Depends(deps)):
     """What this server will let a caller do. Never includes commands, paths, or secrets."""
     return ConfigOut(
         demo_enabled=d.cfg.demo_enabled, allow_custom_runs=d.cfg.allow_custom_runs, auth_required=bool(d.cfg.api_token),
-        projects=[ProjectInfo(name=n, pages=p.pages, can_publish=p.allow_push) for n, p in sorted(d.projects.items())])
+        projects=[ProjectInfo(name=n, pages=p.pages, can_publish=p.allow_push, base_branch=p.base_branch)
+                  for n, p in sorted(d.projects.items())],
+        settings=SettingsOut(
+            triage_model=d.cfg.triage_model, fix_model=d.cfg.fix_model, model_token_budget=d.cfg.model_token_budget,
+            refusal_fallback=d.cfg.refusal_fallback, send_screenshots_to_model=d.cfg.send_screenshots_to_model,
+            max_concurrent_runs=d.cfg.max_concurrent_runs, run_timeout_s=d.cfg.run_timeout_s,
+            max_findings_per_page=d.cfg.max_findings_per_page, model_configured=bool(d.cfg.anthropic_api_key)))
 
 
 def _pages(specs) -> list[dict] | None:
@@ -187,7 +228,9 @@ async def cancel_run(run_id: str, d=Depends(deps)):
 @router.get("/runs", response_model=list[RunOut])
 def list_runs(d=Depends(deps)):
     with d.sf() as db:
-        return [_run_out(r) for r in db.scalars(select(AuditRun).order_by(AuditRun.created_at.desc()).limit(50))]
+        runs = db.scalars(select(AuditRun).order_by(AuditRun.created_at.desc()).limit(50)).all()
+        errors = _last_errors(db, [r.id for r in runs if r.status == RunStatus.failed])
+        return [_run_out(r, errors.get(r.id)) for r in runs]
 
 
 def _get_run(db, run_id: str) -> AuditRun:
@@ -213,6 +256,8 @@ def dashboard(run_id: str, d=Depends(deps)):
             .join(Finding, Finding.id == FixAttempt.finding_id).where(Finding.run_id == run_id)))
         summary = run.summary or {}
         run_out = _run_out(run)
+        meta = build_meta(db, run, len(pages), False)
+        stages = build_stages(db, run)
 
     def row(f: Finding) -> FindingRow:
         return FindingRow(id=f.id, rule_id=f.rule_id, sc_ids=f.sc_ids, severity=f.severity.value, status=f.status.value,
@@ -238,7 +283,7 @@ def dashboard(run_id: str, d=Depends(deps)):
     base = {s.page_state_id: s.score for s in scores if s.phase == "baseline"}
     after = {s.page_state_id: s.score for s in scores if s.phase == "after"}
     return Dashboard(
-        run=run_out, headline=headline, counts=counts, severity={k: sum(f.severity.value == k for f in findings) for k in sev_rank},
+        run=run_out, meta=meta, stages=stages, headline=headline, counts=counts, severity={k: sum(f.severity.value == k for f in findings) for k in sev_rank},
         score_before=ScoreOut(**summary["score_before"]) if summary.get("score_before") else None,
         score_after=ScoreOut(**summary["score_after"]) if summary.get("score_after") else None, groups=groups,
         pages=[PageOut(id=p.id, label=page_label[p.id], path=urlsplit(p.url).path or "/",
@@ -262,7 +307,19 @@ def finding_detail(finding_id: str, d=Depends(deps)):
         rg = db.scalar(select(RegressionCheck).join(FixAttempt, FixAttempt.id == RegressionCheck.fix_attempt_id)
                        .where(FixAttempt.finding_id == finding_id))
         diff_ev = next((e for e in evs if e.kind == "diff"), None)
+        loc = db.get(FindingLocator, finding_id)
+        fp = (loc.fingerprint if loc else None) or {}
+        selector = (" ".join(map(str, loc.axe_target)) if loc and loc.axe_target else None) or fp.get("stable_css") or fp.get("css_path")
+        hit = next((e.payload for e in evs if e.kind == "source_hit"), None) or {}
+        src = (hit.get("hit") or {}) if hit.get("unique") else {}
+        detail = next((e.payload for e in evs if e.kind == "detector_detail"), None) or {}
+        dec = db.scalar(select(HumanDecision.action).where(HumanDecision.finding_id == finding_id,
+                                                           HumanDecision.action.in_(("accept_pr", "reject_pr")))
+                        .order_by(HumanDecision.created_at.desc(), HumanDecision.id.desc()))
+        titles = {c.sc_id: c.title for c in db.scalars(select(Criterion).where(Criterion.sc_id.in_(f.sc_ids or [])))}
         return FindingDetail(
+            selector=selector, source=f"{src['file']}:{src['line']}" if src.get("file") and src.get("line") else None,
+            sc_titles=titles, decision=dec, instances=int(detail.get("instances") or 1),
             id=f.id, run_id=f.run_id, rule_id=f.rule_id, sc_ids=f.sc_ids, severity=f.severity.value,
             status=f.status.value, page=ps.state_label or urlsplit(ps.url).path, impact_text=f.impact_text,
             triage=None if v is None else TriageOut(
@@ -316,6 +373,42 @@ def decide(finding_id: str, body: DecisionIn, d=Depends(deps)):
         db.add(h)
         db.commit()
         return DecisionOut(id=h.id, finding_id=finding_id, action=h.action)
+
+
+@router.get("/runs/{run_id}/pull-requests", response_model=PullRequestsOut)
+def pull_requests(run_id: str, d=Depends(deps)):
+    with d.sf() as db:
+        run = _get_run(db, run_id)
+        rows = build_pull_requests(db, run)
+        project = run.target_url.removeprefix("project:") if run.target_url.startswith("project:") else None
+        proj = d.projects.get(project) if project else None
+        can = bool(proj and proj.allow_push and run.status in TERMINAL)
+    return PullRequestsOut(
+        run_id=run_id, project=project, can_publish=can, rows=rows,
+        publishable=sum(r.decision == "accepted" and r.remote != "open" for r in rows),
+        published=sum(r.remote == "open" for r in rows))
+
+
+@router.post("/runs/{run_id}/publish", response_model=PublishOut)
+async def publish(run_id: str, d=Depends(deps)):
+    """Push the fixes a person accepted (and that were proved) and open pull requests for them."""
+    with d.sf() as db:
+        run = _get_run(db, run_id)
+        target, status = run.target_url, run.status
+    if not target.startswith("project:"):
+        raise HTTPException(403, "only runs on an operator-defined project can publish")
+    proj = d.projects.get(target.removeprefix("project:"))
+    if proj is None or not proj.allow_push:
+        raise HTTPException(403, "this project is not allowed to publish (allow_push is false)")
+    if status not in TERMINAL or d.active_runs() > 0:
+        raise HTTPException(409, "wait for runs to finish before publishing")
+    try:
+        out = await asyncio.to_thread(publish_accepted, d.sf, proj, run_id)
+    except PublishRefused as e:
+        raise HTTPException(e.status, e.detail) from None
+    if not out.opened and out.errors:
+        raise HTTPException(502, "; ".join(out.errors))
+    return out
 
 
 # ------------------------------------------------------------------------------------------ SSE

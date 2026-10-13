@@ -164,6 +164,43 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/runs/{run_id}/publish": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Publish
+         * @description Push the fixes a person accepted (and that were proved) and open pull requests for them.
+         */
+        post: operations["publish_api_runs__run_id__publish_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/runs/{run_id}/pull-requests": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Pull Requests */
+        get: operations["pull_requests_api_runs__run_id__pull_requests_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/runs/{run_id}/report": {
         parameters: {
             query?: never;
@@ -215,6 +252,7 @@ export interface components {
             demo_enabled: boolean;
             /** Projects */
             projects: components["schemas"]["ProjectInfo"][];
+            settings: components["schemas"]["SettingsOut"];
         };
         /** Counts */
         Counts: {
@@ -238,6 +276,7 @@ export interface components {
             groups: components["schemas"]["Group"][];
             /** Headline */
             headline: string;
+            meta: components["schemas"]["RunMeta"];
             /** Model Kind */
             model_kind?: string | null;
             /** Notice */
@@ -251,6 +290,8 @@ export interface components {
             severity: {
                 [key: string]: number;
             };
+            /** Stages */
+            stages: components["schemas"]["StageOut"][];
         };
         /** DecisionIn */
         DecisionIn: {
@@ -298,6 +339,11 @@ export interface components {
         };
         /** FindingDetail */
         FindingDetail: {
+            /**
+             * Decision
+             * @description accept_pr | reject_pr: the latest decision a person recorded
+             */
+            decision?: string | null;
             /** Evidence */
             evidence: components["schemas"]["EvidenceOut"][];
             fix: components["schemas"]["FixOut"] | null;
@@ -305,6 +351,11 @@ export interface components {
             id: string;
             /** Impact Text */
             impact_text: string | null;
+            /**
+             * Instances
+             * @default 1
+             */
+            instances: number;
             /** Notice */
             notice: string;
             /** Page */
@@ -317,8 +368,19 @@ export interface components {
             run_id: string;
             /** Sc Ids */
             sc_ids: string[];
+            /** Sc Titles */
+            sc_titles?: {
+                [key: string]: string;
+            };
+            /** Selector */
+            selector?: string | null;
             /** Severity */
             severity: string;
+            /**
+             * Source
+             * @description file:line in the audited repo, when the element maps to exactly one place
+             */
+            source?: string | null;
             /** Status */
             status: string;
             triage: components["schemas"]["TriageOut"] | null;
@@ -400,6 +462,11 @@ export interface components {
         };
         /** ProjectInfo */
         ProjectInfo: {
+            /**
+             * Base Branch
+             * @default main
+             */
+            base_branch: string;
             /** Can Publish */
             can_publish: boolean;
             /** Name */
@@ -426,6 +493,93 @@ export interface components {
             /** Verdict */
             verdict: string;
         };
+        /** PublishOut */
+        PublishOut: {
+            /** Errors */
+            errors?: string[];
+            /** Opened */
+            opened: components["schemas"]["PublishedPr"][];
+        };
+        /** PublishedPr */
+        PublishedPr: {
+            /** Branch */
+            branch: string;
+            /** Fixes */
+            fixes: number;
+            /** Tier */
+            tier: string;
+            /** Url */
+            url: string;
+        };
+        /** PullRequestRow */
+        PullRequestRow: {
+            /**
+             * Added
+             * @default 0
+             */
+            added: number;
+            /** Branch */
+            branch: string;
+            /**
+             * Decision
+             * @description awaiting | accepted | rejected | held_back
+             */
+            decision: string;
+            /** File */
+            file?: string | null;
+            /** Finding Id */
+            finding_id: string;
+            /** Page */
+            page: string;
+            /** Pr Number */
+            pr_number?: number | null;
+            /** Pr Url */
+            pr_url?: string | null;
+            /**
+             * Proof
+             * @description proved | not_retested | fix_failed | regression
+             */
+            proof: string;
+            /**
+             * Remote
+             * @description open | server_only | not_publishable
+             */
+            remote: string;
+            /**
+             * Removed
+             * @default 0
+             */
+            removed: number;
+            /** Rule Id */
+            rule_id: string;
+            /** Sc Ids */
+            sc_ids: string[];
+            /** Severity */
+            severity: string;
+            /** Tier */
+            tier?: string | null;
+        };
+        /** PullRequestsOut */
+        PullRequestsOut: {
+            /**
+             * Can Publish
+             * @description the project allows publishing and this run is finished
+             */
+            can_publish: boolean;
+            /** Project */
+            project?: string | null;
+            /**
+             * Publishable
+             * @description accepted, proved fixes that are not on the remote yet
+             */
+            publishable: number;
+            /** Published */
+            published: number;
+            /** Rows */
+            rows: components["schemas"]["PullRequestRow"][];
+            /** Run Id */
+            run_id: string;
+        };
         /** RegressionOut */
         RegressionOut: {
             /** Regressions */
@@ -435,14 +589,59 @@ export interface components {
             /** Verdict */
             verdict: string;
         };
+        /** RunMeta */
+        RunMeta: {
+            /** Base Branch */
+            base_branch?: string | null;
+            /** Base Sha */
+            base_sha?: string | null;
+            /** Duration S */
+            duration_s?: number | null;
+            /** Model Token Budget */
+            model_token_budget?: number | null;
+            /** Model Tokens Used */
+            model_tokens_used?: number | null;
+            /** Page Count */
+            page_count: number;
+            /** Project */
+            project?: string | null;
+            /**
+             * Publish
+             * @default false
+             */
+            publish: boolean;
+            /** Started At */
+            started_at: string;
+        };
         /** RunOut */
         RunOut: {
+            /** Base Branch */
+            base_branch?: string | null;
             /** Created At */
             created_at: string;
+            /** Findings */
+            findings?: number | null;
+            /** Fixed */
+            fixed?: number | null;
             /** Headline */
             headline?: string | null;
             /** Id */
             id: string;
+            /** Needs Human */
+            needs_human?: number | null;
+            /** Page Count */
+            page_count?: number | null;
+            /** Project */
+            project?: string | null;
+            /**
+             * Result
+             * @description one line: the headline, or why the run failed or was cancelled
+             */
+            result?: string | null;
+            /** Score After */
+            score_after?: number | null;
+            /** Score Before */
+            score_before?: number | null;
             /** Status */
             status: string;
             /** Target */
@@ -454,6 +653,49 @@ export interface components {
             score: number;
             /** Worst */
             worst: number;
+        };
+        /**
+         * SettingsOut
+         * @description Read-only view of how the operator configured this server. Never includes secrets, paths or commands.
+         */
+        SettingsOut: {
+            /** Fix Model */
+            fix_model: string;
+            /** Max Concurrent Runs */
+            max_concurrent_runs: number;
+            /** Max Findings Per Page */
+            max_findings_per_page: number;
+            /** Model Configured */
+            model_configured: boolean;
+            /** Model Token Budget */
+            model_token_budget: number;
+            /** Refusal Fallback */
+            refusal_fallback: boolean;
+            /** Run Timeout S */
+            run_timeout_s: number;
+            /** Send Screenshots To Model */
+            send_screenshots_to_model: boolean;
+            /** Triage Model */
+            triage_model: string;
+        };
+        /** StageOut */
+        StageOut: {
+            /** Detail */
+            detail: string;
+            /**
+             * Key
+             * @description detect | triage | fix | prove | regress
+             */
+            key: string;
+            /** Seconds */
+            seconds?: number | null;
+            /**
+             * State
+             * @description done | current | waiting | stopped
+             */
+            state: string;
+            /** Title */
+            title: string;
         };
         /**
          * StartRun
@@ -1405,6 +1647,212 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description missing or invalid API token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description not allowed on this server */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description conflicts with the current state */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Content-Length required */
+            411: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description request body too large */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description host not allowed */
+            421: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description a run is already in progress */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    publish_api_runs__run_id__publish_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublishOut"];
+                };
+            };
+            /** @description missing or invalid API token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description not allowed on this server */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description conflicts with the current state */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Content-Length required */
+            411: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description request body too large */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description host not allowed */
+            421: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description a run is already in progress */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    pull_requests_api_runs__run_id__pull_requests_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PullRequestsOut"];
                 };
             };
             /** @description missing or invalid API token */

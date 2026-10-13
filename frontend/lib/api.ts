@@ -6,6 +6,11 @@ export type FindingRow = components["schemas"]["FindingRow"];
 export type RunOut = components["schemas"]["RunOut"];
 export type StartRun = components["schemas"]["StartRun"];
 export type EvidenceOut = components["schemas"]["EvidenceOut"];
+export type StageOut = components["schemas"]["StageOut"];
+export type PullRequestRow = components["schemas"]["PullRequestRow"];
+export type PullRequestsOut = components["schemas"]["PullRequestsOut"];
+export type PublishOut = components["schemas"]["PublishOut"];
+export type ProjectInfo = components["schemas"]["ProjectInfo"];
 
 // Same-origin: requests go to this app's /api proxy, which attaches the server-side API token.
 export const API_BASE = "";
@@ -47,6 +52,8 @@ export const api = {
   finding: (id: string) => request<FindingDetail>(`/api/findings/${id}`),
   decide: (id: string, action: string, note?: string) =>
     request(`/api/findings/${id}/decision`, { method: "POST", body: JSON.stringify({ action, note }) }),
+  pullRequests: (id: string) => request<PullRequestsOut>(`/api/runs/${id}/pull-requests`),
+  publish: (id: string) => request<PublishOut>(`/api/runs/${id}/publish`, { method: "POST" }),
   url: (path: string) => `${API_BASE}${path}`,
   eventsUrl: (id: string) => `${API_BASE}/api/runs/${id}/events`,
 };
