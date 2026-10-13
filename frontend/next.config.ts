@@ -32,6 +32,7 @@ const nextConfig: NextConfig = {
   cacheComponents: true,
   partialPrefetching: true,
   poweredByHeader: false,
+  devIndicators: false, // the dev-only "N" badge steals the first Tab stops and overlaps the sidebar
   // A separate output directory lets a production build and a dev server coexist (used by the test suite).
   distDir: process.env.NEXT_DIST_DIR || ".next",
   async headers() {

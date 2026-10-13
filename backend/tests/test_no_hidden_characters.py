@@ -4,7 +4,7 @@ look different from what it does. Auto-formatters have inserted them here more t
 import pathlib
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
-SKIP = {"node_modules", ".venv", ".next", ".next-prod", ".git", "evidence", "__pycache__", ".pytest_cache", ".ruff_cache",
+SKIP = {"node_modules", ".venv", ".next", ".next-prod", ".next-test", ".git", "evidence", "__pycache__", ".pytest_cache", ".ruff_cache",
         "dist"}  # generated output and dependencies are not source we write or review
 EXT = {".py", ".ts", ".tsx", ".js", ".jsx", ".css", ".md", ".json", ".yml", ".yaml", ".toml", ".html", ".sh"}
 FORBIDDEN = set(range(0x09)) | {0x0B, 0x0C} | set(range(0x0E, 0x20)) | {0x7F} | set(range(0x202A, 0x202F)) \

@@ -31,7 +31,7 @@ from ..models import (
 )
 from ..remediate import RemediationConfig, run_remediation
 from ..report.html import run_report
-from .auth import require_auth
+from .auth import Principal, require_auth
 from .publish import PublishRefused, publish_accepted
 from .schemas import (
     ConfigOut,
@@ -108,8 +108,10 @@ def _last_errors(db, run_ids: list[str]) -> dict[str, str]:
 
 
 @router.get("/status", response_model=StatusOut)
-def status(d=Depends(deps)):
-    """Operational counters. Authenticated, unlike /health."""
+def status(d=Depends(deps), who: Principal = Depends(require_auth)):
+    """Operational counters across every account, so only the local operator may read them. Authenticated, unlike /health."""
+    if not who.is_local:
+        raise HTTPException(404, "not found")
     return StatusOut(active_runs=d.active_runs(), max_concurrent_runs=d.cfg.max_concurrent_runs,
                      event_subscribers=sum(len(v) for v in d.bus._subs.values()))
 
@@ -168,13 +170,13 @@ def _resolve(body: StartRun, d) -> tuple[str, RemediationConfig | None]:
 
 
 @router.post("/runs", response_model=RunOut, status_code=202)
-async def start_run(body: StartRun, d=Depends(deps)):
+async def start_run(body: StartRun, d=Depends(deps), who: Principal = Depends(require_auth)):
     target, cfg = _resolve(body, d)
     if d.active_runs() >= d.cfg.max_concurrent_runs:
         raise HTTPException(429, "a run is already in progress; wait for it to finish or cancel it",
                             headers={"Retry-After": "30"})
     with d.sf() as db:
-        run = AuditRun(target_url=target)
+        run = AuditRun(target_url=target, owner_id=who.account_id)
         db.add(run)
         db.commit()
         db.refresh(run)
@@ -213,37 +215,52 @@ async def _execute(d, run_id: str, body: StartRun, cfg: RemediationConfig | None
 
 
 @router.post("/runs/{run_id}/cancel", response_model=RunOut)
-async def cancel_run(run_id: str, d=Depends(deps)):
+async def cancel_run(run_id: str, d=Depends(deps), who: Principal = Depends(require_auth)):
     task = d.tasks.get(run_id)
     with d.sf() as db:
-        run = _get_run(db, run_id)
+        run = _get_run(db, run_id, who)
         if task is None or run.status in TERMINAL:
             raise HTTPException(409, "this run is not running")
     task.cancel()
     await asyncio.wait({task}, timeout=30)  # wait for cleanup (dev server, branch restore) to finish
     with d.sf() as db:
-        return _run_out(_get_run(db, run_id))
+        return _run_out(_get_run(db, run_id, who))
 
 
 @router.get("/runs", response_model=list[RunOut])
-def list_runs(d=Depends(deps)):
+def list_runs(d=Depends(deps), who: Principal = Depends(require_auth)):
     with d.sf() as db:
-        runs = db.scalars(select(AuditRun).order_by(AuditRun.created_at.desc()).limit(50)).all()
+        q = select(AuditRun).order_by(AuditRun.created_at.desc()).limit(50)
+        if not who.is_local:
+            q = q.where(AuditRun.owner_id == who.account_id)
+        runs = db.scalars(q).all()
         errors = _last_errors(db, [r.id for r in runs if r.status == RunStatus.failed])
         return [_run_out(r, errors.get(r.id)) for r in runs]
 
 
-def _get_run(db, run_id: str) -> AuditRun:
+def _get_run(db, run_id: str, who: Principal) -> AuditRun:
+    """The run, if it exists AND belongs to the caller. Someone else's run answers exactly like a missing one (404), so
+    ids cannot be probed to learn what exists."""
     run = db.get(AuditRun, run_id)
-    if run is None:
+    if run is None or not who.can_see(run.owner_id):
         raise HTTPException(404, "run not found")
     return run
 
 
+def _get_finding(db, finding_id: str, who: Principal) -> Finding:
+    f = db.get(Finding, finding_id)
+    if f is None:
+        raise HTTPException(404, "finding not found")
+    run = db.get(AuditRun, f.run_id)
+    if run is None or not who.can_see(run.owner_id):
+        raise HTTPException(404, "finding not found")
+    return f
+
+
 @router.get("/runs/{run_id}/dashboard", response_model=Dashboard)
-def dashboard(run_id: str, d=Depends(deps)):
+def dashboard(run_id: str, d=Depends(deps), who: Principal = Depends(require_auth)):
     with d.sf() as db:
-        run = _get_run(db, run_id)
+        run = _get_run(db, run_id, who)
         findings = db.scalars(select(Finding).where(Finding.run_id == run_id)).all()
         pages = db.scalars(select(PageState).where(PageState.run_id == run_id)).all()
         scores = db.scalars(select(PageScore).where(PageScore.run_id == run_id)).all()
@@ -292,11 +309,9 @@ def dashboard(run_id: str, d=Depends(deps)):
 
 
 @router.get("/findings/{finding_id}", response_model=FindingDetail)
-def finding_detail(finding_id: str, d=Depends(deps)):
+def finding_detail(finding_id: str, d=Depends(deps), who: Principal = Depends(require_auth)):
     with d.sf() as db:
-        f = db.get(Finding, finding_id)
-        if f is None:
-            raise HTTPException(404, "finding not found")
+        f = _get_finding(db, finding_id, who)
         ps = db.get(PageState, f.page_state_id)
         evs = db.scalars(select(FindingEvidence).where(FindingEvidence.finding_id == finding_id)
                          .order_by(FindingEvidence.created_at, FindingEvidence.id)).all()
@@ -339,11 +354,12 @@ def finding_detail(finding_id: str, d=Depends(deps)):
 
 
 @router.get("/evidence/{evidence_id}")
-def evidence_blob(evidence_id: str, d=Depends(deps)):
+def evidence_blob(evidence_id: str, d=Depends(deps), who: Principal = Depends(require_auth)):
     with d.sf() as db:
         e = db.get(FindingEvidence, evidence_id)
         if e is None or not e.blob_ref:
             raise HTTPException(404, "no such evidence")
+        _get_finding(db, e.finding_id, who)  # evidence belongs to a finding, which belongs to a run, which has an owner
         ref = e.blob_ref
     try:
         data = d.store.get(ref)
@@ -353,32 +369,31 @@ def evidence_blob(evidence_id: str, d=Depends(deps)):
 
 
 @router.get("/runs/{run_id}/report", response_class=HTMLResponse)
-def report(run_id: str, d=Depends(deps)):
+def report(run_id: str, d=Depends(deps), who: Principal = Depends(require_auth)):
     with d.sf() as db:
-        _get_run(db, run_id)
+        _get_run(db, run_id, who)
     return HTMLResponse(run_report(d.sf, d.store, run_id), headers={
         "Content-Security-Policy": "default-src 'none'; img-src data:; style-src 'unsafe-inline'; base-uri 'none'; "
         "form-action 'none'; frame-ancestors 'none'"})
 
 
 @router.post("/findings/{finding_id}/decision", response_model=DecisionOut, status_code=201)
-def decide(finding_id: str, body: DecisionIn, d=Depends(deps)):
+def decide(finding_id: str, body: DecisionIn, d=Depends(deps), who: Principal = Depends(require_auth)):
     with d.sf() as db:
-        if db.get(Finding, finding_id) is None:
-            raise HTTPException(404, "finding not found")
+        _get_finding(db, finding_id, who)
         v = db.scalar(select(TriageVerdict).where(TriageVerdict.finding_id == finding_id)
                       .order_by(TriageVerdict.created_at.desc()))
         h = HumanDecision(finding_id=finding_id, verdict_id=v.id if v else None, action=body.action,
-                          reviewer=body.reviewer, note=body.note)
+                          reviewer=body.reviewer if who.is_local else who.login, note=body.note)
         db.add(h)
         db.commit()
         return DecisionOut(id=h.id, finding_id=finding_id, action=h.action)
 
 
 @router.get("/runs/{run_id}/pull-requests", response_model=PullRequestsOut)
-def pull_requests(run_id: str, d=Depends(deps)):
+def pull_requests(run_id: str, d=Depends(deps), who: Principal = Depends(require_auth)):
     with d.sf() as db:
-        run = _get_run(db, run_id)
+        run = _get_run(db, run_id, who)
         rows = build_pull_requests(db, run)
         project = run.target_url.removeprefix("project:") if run.target_url.startswith("project:") else None
         proj = d.projects.get(project) if project else None
@@ -390,10 +405,10 @@ def pull_requests(run_id: str, d=Depends(deps)):
 
 
 @router.post("/runs/{run_id}/publish", response_model=PublishOut)
-async def publish(run_id: str, d=Depends(deps)):
+async def publish(run_id: str, d=Depends(deps), who: Principal = Depends(require_auth)):
     """Push the fixes a person accepted (and that were proved) and open pull requests for them."""
     with d.sf() as db:
-        run = _get_run(db, run_id)
+        run = _get_run(db, run_id, who)
         target, status = run.target_url, run.status
     if not target.startswith("project:"):
         raise HTTPException(403, "only runs on an operator-defined project can publish")
@@ -417,10 +432,11 @@ def _sse(seq: int, type_: str, payload: dict) -> str:
 
 
 @router.get("/runs/{run_id}/events")
-async def events(run_id: str, request: Request, after: int = Query(0, ge=0), d=Depends(deps)):
+async def events(run_id: str, request: Request, after: int = Query(0, ge=0), d=Depends(deps),
+                 who: Principal = Depends(require_auth)):
     """Server-sent events: replays from Last-Event-ID / ?after, then tails live; closes when the run ends."""
     with d.sf() as db:
-        _get_run(db, run_id)
+        _get_run(db, run_id, who)
     last = after
     header = request.headers.get("last-event-id")
     if header and header.isdigit():

@@ -14,6 +14,8 @@ from auditor.pipeline.axe_runner import run_axe
 from auditor.reprove.devserver import dev_server, free_port
 
 FRONTEND = Path(__file__).resolve().parents[2] / "frontend"
+# A build folder of their own: Next allows one dev server per folder, and a developer may already have one running.
+TEST_DIST = ".next-test"
 pytestmark = [pytest.mark.timeout(420),
               pytest.mark.skipif(not (FRONTEND / "node_modules").is_dir(), reason="frontend deps not installed")]
 
@@ -25,7 +27,7 @@ def _stack(tmp_path, token: str, ui_auth: str = ""):
     if token:
         env["API_TOKEN"] = token
     api_cmd = f"{sys.executable} -m uvicorn auditor.main:create_app --factory --host 127.0.0.1 --port {api_port}"
-    web_env = {"API_INTERNAL_URL": f"http://127.0.0.1:{api_port}", "AUDITOR_API_TOKEN": token}
+    web_env = {"NEXT_DIST_DIR": TEST_DIST, "API_INTERNAL_URL": f"http://127.0.0.1:{api_port}", "AUDITOR_API_TOKEN": token}
     if ui_auth:
         web_env["UI_BASIC_AUTH"] = ui_auth
     return (dev_server(tmp_path, api_cmd, port=api_port, env=env),
@@ -256,7 +258,7 @@ def test_the_proxy_refuses_path_tricks_and_reports_a_dead_backend(tmp_path):
 
 def web_cm2(tmp_path):
     return dev_server(FRONTEND, "pnpm exec next dev --port {port} --hostname 127.0.0.1", startup_timeout=120,
-                      env={"API_INTERNAL_URL": f"http://127.0.0.1:{free_port()}", "AUDITOR_API_TOKEN": ""})
+                      env={"NEXT_DIST_DIR": TEST_DIST, "API_INTERNAL_URL": f"http://127.0.0.1:{free_port()}", "AUDITOR_API_TOKEN": ""})
 
 
 # ---------------------------------------------------------------- the production build, with its CSP, in a real browser
@@ -346,7 +348,7 @@ async def test_accept_then_publish_through_the_ui_pushes_only_what_was_accepted(
     api_env = {"DATABASE_URL": f"sqlite:///{tmp_path}/p.db", "EVIDENCE_DIR": str(tmp_path / "ev"), "ANTHROPIC_API_KEY": "",
                "PROJECTS_FILE": str(projects), "PATH": f"{bindir}:{os.environ['PATH']}",
                "GH_LOG": str(tmp_path / "gh_log"), "GH_STATE": str(tmp_path / "gh_state"), "GH_COUNT": str(tmp_path / "gh_count")}
-    web_env = {"API_INTERNAL_URL": f"http://127.0.0.1:{api_port}", "AUDITOR_API_TOKEN": ""}
+    web_env = {"NEXT_DIST_DIR": TEST_DIST, "API_INTERNAL_URL": f"http://127.0.0.1:{api_port}", "AUDITOR_API_TOKEN": ""}
     with dev_server(tmp_path, api_cmd, port=api_port, env=api_env) as api, dev_server(
             FRONTEND, "pnpm exec next dev --port {port} --hostname 127.0.0.1", startup_timeout=120, env=web_env) as web:
         async with async_playwright() as pw:
@@ -399,3 +401,129 @@ async def test_accept_then_publish_through_the_ui_pushes_only_what_was_accepted(
             assert subprocess.run(["git", "status", "--porcelain"], cwd=repo, capture_output=True, text=True).stdout == ""
             assert await axe_violations(page) == []
             await browser.close()
+
+
+class FakeGitHub:
+    """A real HTTP server that plays GitHub's sign-in: authorize (redirects back with a code), token exchange, /user."""
+
+    def __init__(self):
+        import json
+        import threading
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+        from urllib.parse import parse_qs, urlsplit
+
+        outer = self
+        self.current = "alice"
+        self.users = {"alice": {"id": 101, "login": "alice", "name": "Alice A"}, "bob": {"id": 202, "login": "bob", "name": "Bob B"}}
+
+        class H(BaseHTTPRequestHandler):
+            def log_message(self, *a):  # keep test output quiet
+                pass
+
+            def _json(self, obj, status=200):
+                body = json.dumps(obj).encode()
+                self.send_response(status)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def do_GET(self):
+                u = urlsplit(self.path)
+                q = parse_qs(u.query)
+                if u.path == "/login/oauth/authorize":
+                    self.send_response(302)
+                    self.send_header("Location", f"{q['redirect_uri'][0]}?code=code-{outer.current}&state={q['state'][0]}")
+                    self.end_headers()
+                elif u.path == "/user":
+                    who = self.headers.get("Authorization", "").removeprefix("Bearer gho_secret_")
+                    self._json(outer.users[who]) if who in outer.users else self._json({}, 401)
+                else:
+                    self._json({}, 404)
+
+            def do_POST(self):
+                body = self.rfile.read(int(self.headers.get("Content-Length", 0))).decode()
+                who = parse_qs(body)["code"][0].removeprefix("code-")
+                self._json({"access_token": f"gho_secret_{who}"})
+
+        self.server = ThreadingHTTPServer(("127.0.0.1", 0), H)
+        self.url = f"http://127.0.0.1:{self.server.server_address[1]}"
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+
+    def close(self):
+        self.server.shutdown()
+        self.server.server_close()
+
+
+async def test_sign_in_with_github_end_to_end_and_people_cannot_see_each_others_runs(tmp_path):
+    from cryptography.fernet import Fernet
+
+    gh = FakeGitHub()
+    web_port, api_port = free_port(), free_port()
+    web_url = f"http://127.0.0.1:{web_port}"
+    api_cmd = f"{sys.executable} -m uvicorn auditor.main:create_app --factory --host 127.0.0.1 --port {api_port}"
+    api_env = {"DATABASE_URL": f"sqlite:///{tmp_path}/a.db", "EVIDENCE_DIR": str(tmp_path / "ev"), "ANTHROPIC_API_KEY": "",
+               "AUTH_MODE": "accounts", "PUBLIC_URL": web_url, "SECRETS_KEY": Fernet.generate_key().decode(),
+               "GITHUB_CLIENT_ID": "cid", "GITHUB_CLIENT_SECRET": "csec", "GITHUB_WEB_BASE": gh.url, "GITHUB_API_BASE": gh.url}
+    web_env = {"NEXT_DIST_DIR": TEST_DIST, "API_INTERNAL_URL": f"http://127.0.0.1:{api_port}", "AUDITOR_API_TOKEN": ""}
+    try:
+        with dev_server(tmp_path, api_cmd, port=api_port, env=api_env), dev_server(
+                FRONTEND, "pnpm exec next dev --port {port} --hostname 127.0.0.1", port=web_port, startup_timeout=120, env=web_env):
+            async with async_playwright() as pw:
+                browser = await pw.chromium.launch()
+                alice = await browser.new_context(viewport={"width": 1280, "height": 900})
+                page = await alice.new_page()
+                requested: list[str] = []
+                page.on("request", lambda r: requested.append(r.url))
+
+                # signed out: every page leads to the sign-in page, which is accessible and says what it will do
+                await page.goto(web_url + "/runs/anything", wait_until="networkidle")
+                await page.wait_for_url("**/login?next=*")
+                await expect(page.get_by_role("heading", name="Sign in")).to_be_visible()
+                assert await axe_violations(page) == []
+                assert await page.locator("aside").count() == 0  # no app chrome before signing in
+
+                # the whole round trip through GitHub, and back to where alice was going
+                gh.current = "alice"
+                await page.get_by_role("link", name="Continue with GitHub").click()
+                await page.wait_for_url(web_url + "/runs/anything")
+                await expect(page.get_by_text("alice", exact=True)).to_be_visible()
+                cookies = {c["name"]: c for c in await alice.cookies()}
+                assert cookies["attest_session"]["httpOnly"] is True and cookies["attest_session"]["sameSite"] == "Lax"
+                assert "attest_session" not in await page.evaluate("document.cookie")  # page scripts cannot read it
+                await page.goto(web_url + "/", wait_until="networkidle")
+                await expect(page.get_by_role("heading", name="Runs", exact=True)).to_be_visible()
+                assert await axe_violations(page) == []
+
+                # alice starts a run
+                await start_demo_run(page, web_url)
+                alice_run = page.url
+                await expect(page.get_by_text("Run complete.")).to_be_visible(timeout=240_000)
+
+                # bob, in his own browser, sees none of it - not in the list, and not by typing the address
+                bob = await browser.new_context(viewport={"width": 1280, "height": 900})
+                bpage = await bob.new_page()
+                gh.current = "bob"
+                await bpage.goto(web_url + "/", wait_until="networkidle")
+                await bpage.get_by_role("link", name="Continue with GitHub").click()
+                await bpage.wait_for_url(web_url + "/")
+                await expect(bpage.get_by_text("bob", exact=True)).to_be_visible()
+                await expect(bpage.get_by_text("No runs yet")).to_be_visible()
+                await bpage.goto(alice_run, wait_until="networkidle")
+                await expect(bpage.get_by_text("run not found")).to_be_visible()
+                assert "alice" not in await bpage.inner_text("body")
+                assert await bpage.locator("[aria-label='Summary']").count() == 0
+
+                # signing out ends the session, and the next page load is sent to sign in again
+                await page.goto(web_url + "/", wait_until="networkidle")
+                await page.get_by_role("button", name="Sign out").click()
+                await page.wait_for_url("**/login*")
+                await expect(page.get_by_role("heading", name="Sign in")).to_be_visible()
+                assert await page.locator("aside").count() == 0  # the previous person's sidebar and runs are gone
+                await page.goto(web_url + "/", wait_until="networkidle")
+                await page.wait_for_url("**/login?next=*")
+                external = [u for u in requested if not u.startswith(web_url) and not u.startswith(gh.url) and not u.startswith("data:")]
+                assert external == [], external
+                await browser.close()
+    finally:
+        gh.close()

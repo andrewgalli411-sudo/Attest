@@ -69,9 +69,37 @@ class Criterion(Base):
     vpat_row_order: Mapped[int] = mapped_column(Integer)
 
 
+class Account(Base):
+    """A person who signed in with GitHub. Everything they create is owned by this row."""
+
+    __tablename__ = "account"
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_id)
+    github_id: Mapped[int] = mapped_column(Integer, unique=True)
+    login: Mapped[str] = mapped_column(String(100))
+    name: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    avatar_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class UserSession(Base):
+    """Server-side session. Only the SHA-256 of the cookie token is stored, so a database leak cannot be replayed."""
+
+    __tablename__ = "user_session"
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_id)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    account_id: Mapped[str] = mapped_column(ForeignKey("account.id"), index=True)
+    # The user's GitHub token (for listing the repositories they can reach), encrypted; dies with the session.
+    sealed_github_token: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 class AuditRun(Base):
     __tablename__ = "audit_run"
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_id)
+    # None only in local mode (one implicit owner). In accounts mode every run has an owner.
+    owner_id: Mapped[str | None] = mapped_column(ForeignKey("account.id"), nullable=True, index=True)
     target_url: Mapped[str] = mapped_column(Text)
     auth_config: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     flows: Mapped[list | None] = mapped_column(JSON, nullable=True)

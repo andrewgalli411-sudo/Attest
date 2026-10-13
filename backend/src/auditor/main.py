@@ -12,6 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select
 from sqlalchemy.orm import sessionmaker
 
+from .api.accounts import router as accounts_router
 from .api.middleware import SecurityMiddleware
 from .api.routes import TERMINAL, router
 from .config import Settings
@@ -20,6 +21,7 @@ from .disclaimers import DRAFT_BANNER
 from .models import AuditRun, RunStatus
 from .pipeline.events import EventBus
 from .projects import Project, load_projects
+from .secrets import SecretsError, Vault
 from .storage.evidence_store import EvidenceStore
 
 log = logging.getLogger("auditor")
@@ -46,6 +48,7 @@ class Deps:
     work_dir: str
     cfg: Settings
     projects: dict[str, Project]
+    vault: Vault | None = None
     log: logging.Logger = field(default_factory=lambda: log)
     tasks: dict[str, asyncio.Task] = field(default_factory=dict)
 
@@ -140,6 +143,22 @@ def create_app(sf: sessionmaker | None = None, *, store: EvidenceStore | None = 
 
             seed_criteria(db)
     projects = load_projects(cfg.projects_file)  # raises at startup on a bad file: fail fast, not at first request
+    vault = None
+    if cfg.auth_mode not in ("local", "accounts"):
+        raise RuntimeError(f"AUTH_MODE must be 'local' or 'accounts', not {cfg.auth_mode!r}")
+    if cfg.auth_mode == "accounts":
+        missing = [n for n, v in (("SECRETS_KEY", cfg.secrets_key), ("GITHUB_CLIENT_ID", cfg.github_client_id),
+                                  ("GITHUB_CLIENT_SECRET", cfg.github_client_secret), ("PUBLIC_URL", cfg.public_url)) if not v]
+        if missing:
+            raise RuntimeError(f"AUTH_MODE=accounts needs {', '.join(missing)}")
+        try:
+            vault = Vault(cfg.secrets_key)
+        except SecretsError as e:
+            raise RuntimeError(str(e)) from e
+        # A shared server must never run one person's commands or repositories for another: operator projects and
+        # custom runs are local-mode features only.
+        projects = {}
+        cfg = cfg.model_copy(update={"allow_custom_runs": False})
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -155,10 +174,11 @@ def create_app(sf: sessionmaker | None = None, *, store: EvidenceStore | None = 
     app = FastAPI(title="WCAG Auditor", description=DRAFT_BANNER, lifespan=lifespan, **docs)
     app.add_middleware(SecurityMiddleware, max_body=cfg.max_request_bytes)
     app.add_middleware(CORSMiddleware, allow_origins=cfg.cors_origins, allow_methods=["GET", "POST"],
-                       allow_headers=["Authorization", "Content-Type", "Last-Event-ID"])
+                       allow_headers=["Authorization", "Content-Type", "Last-Event-ID", "X-Requested-With"])
     app.state.deps = Deps(sf=sf, store=store or EvidenceStore(cfg.evidence_dir), bus=EventBus(sf),
                           client_factory=client_factory or (lambda: default_client(cfg)),
-                          work_dir=work_dir or cfg.evidence_dir, cfg=cfg, projects=projects)
+                          work_dir=work_dir or cfg.evidence_dir, cfg=cfg, projects=projects, vault=vault)
+    app.include_router(accounts_router)
     app.include_router(router)
 
     @app.get("/api/health")

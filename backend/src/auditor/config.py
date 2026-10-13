@@ -19,6 +19,22 @@ class Settings(BaseSettings):
     # Host header allow-list (blocks DNS-rebinding against the loopback-only mode). "*" disables the check.
     allowed_hosts: list[str] = ["localhost", "127.0.0.1", "[::1]"]
 
+    # ---- accounts (multi-user). "local": one person, API token or loopback. "accounts": sign in with GitHub, every
+    # record owned by an account; operator projects and custom commands are switched off.
+    auth_mode: str = "local"
+    public_url: str = "http://localhost:3000"  # the address people use; OAuth redirects and cookie flags derive from it
+    session_ttl_s: int = 7 * 24 * 3600
+    # Encrypts secrets at rest (test-login cookies, GitHub user tokens). A urlsafe base64 32-byte key; required in
+    # accounts mode. Generate with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+    secrets_key: str = ""
+    github_app_id: str = ""
+    github_app_private_key: str = ""  # PEM; \n escapes accepted
+    github_client_id: str = ""
+    github_client_secret: str = ""
+    github_webhook_secret: str = ""
+    github_web_base: str = "https://github.com"
+    github_api_base: str = "https://api.github.com"
+
     # ---- what the API is allowed to make this server do
     # Path to a JSON file of operator-defined projects (repo path, dev command, checks, seeded session).
     projects_file: str = ""

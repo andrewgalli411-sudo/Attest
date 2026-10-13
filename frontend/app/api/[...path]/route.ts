@@ -8,8 +8,9 @@
 const BASE = process.env.API_INTERNAL_URL ?? "http://127.0.0.1:8000";
 const TOKEN = process.env.AUDITOR_API_TOKEN ?? "";
 
-const FORWARD_REQUEST = ["content-type", "accept", "last-event-id"];
-const FORWARD_RESPONSE = ["content-type", "cache-control", "retry-after", "www-authenticate", "x-accel-buffering"];
+// `cookie` carries the sign-in session; `x-requested-with` is the anti-forgery header the API requires for changes.
+const FORWARD_REQUEST = ["content-type", "accept", "last-event-id", "cookie", "x-requested-with"];
+const FORWARD_RESPONSE = ["content-type", "cache-control", "retry-after", "www-authenticate", "x-accel-buffering", "location"];
 
 async function forward(req: Request, ctx: { params: Promise<{ path: string[] }> }): Promise<Response> {
   const { path } = await ctx.params;
@@ -35,6 +36,7 @@ async function forward(req: Request, ctx: { params: Promise<{ path: string[] }> 
       body: req.method === "POST" ? await req.text() : undefined,
       signal: req.signal, // client disconnects (e.g. a closed SSE stream) cancel the upstream request
       cache: "no-store",
+      redirect: "manual", // sign-in redirects (to GitHub, and back) belong to the browser, not to this server
     });
   } catch {
     return Response.json({ detail: "The backend is not reachable from the web server." }, { status: 502 });
@@ -45,6 +47,8 @@ async function forward(req: Request, ctx: { params: Promise<{ path: string[] }> 
     const v = upstream.headers.get(h);
     if (v) out.set(h, v);
   }
+  // Several Set-Cookie headers must stay separate, so they are copied one by one.
+  for (const c of upstream.headers.getSetCookie()) out.append("set-cookie", c);
   return new Response(upstream.body, { status: upstream.status, headers: out });
 }
 

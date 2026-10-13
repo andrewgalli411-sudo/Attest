@@ -2,9 +2,9 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
-import { api, type ConfigOut, type RunOut } from "@/lib/api";
+import { api, type AuthConfig, type ConfigOut, type RunOut } from "@/lib/api";
 import { initials, tokens } from "@/lib/format";
 import { AppContext, type Crumb, type Entry } from "./context";
 import { NewRunDrawer } from "./NewRunDrawer";
@@ -46,7 +46,9 @@ function defaultCrumbs(path: string): Crumb[] {
 
 export function AppShell({ children }: { children: ReactNode }) {
   const path = usePathname();
+  const router = useRouter();
   const desktop = useIsDesktop();
+  const [auth, setAuth] = useState<AuthConfig | null>(null);
   const [config, setConfig] = useState<ConfigOut | null>(null);
   const [allRuns, setAllRuns] = useState<RunOut[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -61,15 +63,26 @@ export function AppShell({ children }: { children: ReactNode }) {
   const reload = useCallback(() => {
     api.runs().then((r) => { setAllRuns(r); setLoadError(null); }).catch((e: Error) => setLoadError(e.message));
   }, []);
+  // Who is this? On a server with accounts, nothing else is fetched until someone is signed in.
   useEffect(() => {
+    api.authConfig().then(setAuth).catch((e: Error) => setLoadError(e.message));
+  }, []);
+  const bare = path === "/login";
+  const ready = !!auth && (auth.mode !== "accounts" || auth.signed_in);
+  useEffect(() => {
+    if (auth && !ready && !bare) router.replace(`/login?next=${encodeURIComponent(path)}`);
+  }, [auth, ready, bare, path, router]);
+  useEffect(() => {
+    if (!ready) return;
     api.config().then(setConfig).catch((e: Error) => setLoadError(e.message));
     const t = setTimeout(() => setChosen(remembered()), 0);
     return () => clearTimeout(t);
-  }, []);
+  }, [ready]);
   useEffect(() => {
+    if (!ready) return;
     const t = setTimeout(reload, 0); // also refreshes the sidebar counts whenever you move around
     return () => clearTimeout(t);
-  }, [path, reload]);
+  }, [path, reload, ready]);
   useEffect(() => {
     const t = setTimeout(() => setNavOpen(false), 0);
     return () => clearTimeout(t);
@@ -125,6 +138,8 @@ export function AppShell({ children }: { children: ReactNode }) {
   const here = activeNav(path);
   const hidden = !desktop && !navOpen;
   const s = config?.settings;
+  if (bare) return <main id="main" tabIndex={-1} className="outline-none">{children}</main>; // sign-in: no app chrome
+  if (!ready) return <p role="status" className="p-7 text-muted">Loading…</p>;
 
   return (
     <AppContext.Provider value={{ config, runs, loadError, reload, entries, project, setProject, openNewRun, setCrumbs }}>
@@ -194,6 +209,24 @@ export function AppShell({ children }: { children: ReactNode }) {
             <p className="m-0 text-[11.5px] leading-[1.45] text-muted">
               Automated first pass. Every change is a pull request a person reviews. Attest does not certify compliance.
             </p>
+            {auth?.mode === "accounts" && auth.login && (
+              <div className="flex items-center gap-2">
+                <span aria-hidden="true" className="flex size-6 flex-none items-center justify-center rounded-full bg-tint text-[11px] font-semibold text-accent">
+                  {auth.login.slice(0, 2).toUpperCase()}
+                </span>
+                <span className="min-w-0 flex-1 truncate text-[12.5px]">{auth.login}</span>
+                <button type="button" className="rounded px-1.5 py-0.5 text-xs text-muted hover:bg-hover hover:text-ink"
+                  onClick={async () => {
+                    await api.logout();
+                    setAuth({ mode: "accounts", signed_in: false, login: null }); // drop everything the last person could see
+                    setConfig(null);
+                    setAllRuns(null);
+                    router.replace("/login");
+                  }}>
+                  Sign out
+                </button>
+              </div>
+            )}
           </div>
         </aside>
 

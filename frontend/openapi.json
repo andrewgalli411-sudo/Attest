@@ -1,6 +1,35 @@
 {
   "components": {
     "schemas": {
+      "AuthConfig": {
+        "properties": {
+          "login": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Login"
+          },
+          "mode": {
+            "title": "Mode",
+            "type": "string"
+          },
+          "signed_in": {
+            "default": false,
+            "title": "Signed In",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "mode"
+        ],
+        "title": "AuthConfig",
+        "type": "object"
+      },
       "ConfigOut": {
         "properties": {
           "allow_custom_runs": {
@@ -596,6 +625,46 @@
           }
         },
         "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "Me": {
+        "properties": {
+          "avatar_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avatar Url"
+          },
+          "login": {
+            "title": "Login",
+            "type": "string"
+          },
+          "mode": {
+            "title": "Mode",
+            "type": "string"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          }
+        },
+        "required": [
+          "mode",
+          "login"
+        ],
+        "title": "Me",
         "type": "object"
       },
       "PageOut": {
@@ -1573,6 +1642,131 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/auth/config": {
+      "get": {
+        "description": "Public: lets the web app decide whether to show a sign-in page.",
+        "operationId": "auth_config_api_auth_config_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthConfig"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Auth Config"
+      }
+    },
+    "/api/auth/github/callback": {
+      "get": {
+        "operationId": "github_callback_api_auth_github_callback_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "code",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 200,
+              "title": "Code",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "state",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 200,
+              "title": "State",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Github Callback"
+      }
+    },
+    "/api/auth/github/login": {
+      "get": {
+        "operationId": "github_login_api_auth_github_login_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "next",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 300,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Next"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Github Login"
+      }
+    },
+    "/api/auth/logout": {
+      "post": {
+        "operationId": "logout_api_auth_logout_post",
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Logout"
+      }
+    },
     "/api/config": {
       "get": {
         "description": "What this server will let a caller do. Never includes commands, paths, or secrets.",
@@ -2051,6 +2245,24 @@
           }
         },
         "summary": "Health"
+      }
+    },
+    "/api/me": {
+      "get": {
+        "operationId": "me_api_me_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Me"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Me"
       }
     },
     "/api/runs": {
@@ -2998,7 +3210,7 @@
     },
     "/api/status": {
       "get": {
-        "description": "Operational counters. Authenticated, unlike /health.",
+        "description": "Operational counters across every account, so only the local operator may read them. Authenticated, unlike /health.",
         "operationId": "status_api_status_get",
         "responses": {
           "200": {

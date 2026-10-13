@@ -15,6 +15,10 @@ const plexMono = localFont({
   display: "swap",
 });
 
+// Every screen depends on who is signed in, so none of them can be a static shell. Opting out of instant-navigation
+// validation is what the Next.js guide for authenticated apps prescribes.
+export const instant = false;
+
 export const metadata: Metadata = {
   title: { default: "Attest", template: "%s · Attest" },
   description: "Finds accessibility issues, proposes fixes as pull requests, and proves each fix with a re-test.",
