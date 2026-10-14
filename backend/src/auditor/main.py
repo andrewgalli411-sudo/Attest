@@ -70,6 +70,7 @@ class Deps:
     guard_factory: Callable | None = None  # () -> BrowserGuard: one per live-site run
     github_factory: Callable | None = None  # (installation_id, 'owner/name') -> GitHubRepoClient
     scratch_root: str = ""
+    publish_locks: dict[str, asyncio.Lock] = field(default_factory=dict)  # one publish at a time per run
     verify_last: dict[str, float] = field(default_factory=dict)  # project id -> when it was last checked
     log: logging.Logger = field(default_factory=lambda: log)
     tasks: dict[str, asyncio.Task] = field(default_factory=dict)

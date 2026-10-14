@@ -36,6 +36,7 @@ from ..remote import RemoteConfig, run_remote_audit
 from ..report.html import run_report
 from .auth import Principal, require_auth
 from .publish import PublishRefused, publish_accepted
+from .publish_remote import publish_remote
 from .schemas import (
     ConfigOut,
     Counts,
@@ -460,6 +461,12 @@ async def publish(run_id: str, d=Depends(deps), who: Principal = Depends(require
     with d.sf() as db:
         run = _get_run(db, run_id, who)
         target, status = run.target_url, run.status
+        remote = (run.config or {}).get("mode") == "remote"
+    if remote:  # a live-site run: the pull request is opened through the GitHub API, with nothing cloned or pushed here
+        if status not in TERMINAL:
+            raise HTTPException(409, "wait for the run to finish before publishing")
+        with d.sf() as db:
+            return await publish_remote(d, who, db.get(AuditRun, run_id))
     if not target.startswith("project:"):
         raise HTTPException(403, "only runs on an operator-defined project can publish")
     proj = d.projects.get(target.removeprefix("project:"))

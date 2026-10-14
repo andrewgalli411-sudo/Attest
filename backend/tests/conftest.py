@@ -1,3 +1,5 @@
+pytest_plugins = ["remote_world"]  # shared fixtures for the live-site tests
+
 import atexit
 import functools
 import glob

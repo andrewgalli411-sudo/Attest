@@ -55,7 +55,7 @@ def _reg_line(r: dict | None) -> str:
     return f"Regression check: {r['regressions_count']} new findings introduced on the pages touched."
 
 
-def build_pr(tier: str, run_id: str, fixes: list[FixSummary]) -> tuple[str, str]:
+def build_pr(tier: str, run_id: str, fixes: list[FixSummary], notes: list[str] | None = None) -> tuple[str, str]:
     title = TIER_TITLES[tier]
     parts = [f"Automated accessibility fixes from audit run `{run_id}` ({len(fixes)} change(s)).", ""]
     for f in fixes:
@@ -70,7 +70,7 @@ def build_pr(tier: str, run_id: str, fixes: list[FixSummary]) -> tuple[str, str]
             _proof_line(f.proof), _reg_line(f.regression), "",
             "```diff", diff, "```", "",
         ]
-    parts += ["---", STANDING_LINE]
+    parts += ["---", *[_clean(n, "note") for n in (notes or [])], STANDING_LINE]
     body = "\n".join(parts)
     assert not contains_banned_claim(title) and not contains_banned_claim(body), "unsanitised text reached a pull request"
     return title, body
