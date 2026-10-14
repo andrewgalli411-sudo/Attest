@@ -137,3 +137,9 @@ class GitHubRepoClient:
             raise RepoError("refusing to publish text containing a compliance/certification claim")
         r = (await self._api("POST", f"/repos/{self.repo}/pulls", json={"title": title, "body": body, "head": head, "base": base, "draft": False})).json()
         return r["html_url"], r["number"]
+
+    async def comment(self, number: int, body: str) -> None:
+        """A comment on a pull request (pull requests are issues for the purpose of comments)."""
+        if contains_banned_claim(body):
+            raise RepoError("refusing to publish text containing a compliance/certification claim")
+        await self._api("POST", f"/repos/{self.repo}/issues/{number}/comments", json={"body": body})

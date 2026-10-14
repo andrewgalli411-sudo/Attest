@@ -140,8 +140,8 @@ export default function PullRequestsView() {
                       </div>
                       <div role="cell"><StatusPill status={PROOF_STATUS[r.proof]} /></div>
                       <div role="cell" className={`text-[13px] font-medium ${d.cls}`}>{d.label}</div>
-                      <div role="cell" className={`text-[13px] ${r.remote === "open" ? "font-medium text-accent" : "text-muted"}`}>
-                        {r.remote === "open" ? `PR${r.pr_number ? ` #${r.pr_number}` : ""} · open` : r.remote === "server_only" ? "Server only" : "Not publishable"}
+                      <div role="cell" className={`text-[13px] ${["open", "merged"].includes(r.remote) ? "font-medium text-accent" : "text-muted"}`}>
+                        {["open", "merged", "closed"].includes(r.remote) ? `PR${r.pr_number ? ` #${r.pr_number}` : ""} · ${r.remote}` : r.remote === "server_only" ? "Server only" : "Not publishable"}
                       </div>
                       <div role="cell" aria-hidden="true" className="text-faint-2">›</div>
                     </div>

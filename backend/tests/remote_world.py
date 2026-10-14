@@ -23,6 +23,7 @@ from auditor.demo import SEED_AUTH, prepare_demo_repo
 from auditor.devtools.scripted_client import ScriptedClient
 from auditor.main import create_app
 from auditor.models import ProjectRecord
+from auditor.netguard import UnsafeAddress
 from auditor.pipeline.safe_browse import BrowserGuard
 from auditor.pipeline.safe_proxy import SafeProxy
 from auditor.scm.github_app import GitHubAppAuth
@@ -30,6 +31,7 @@ from auditor.scm.github_repo import GitHubRepoClient
 from auditor.storage.evidence_store import EvidenceStore
 
 HOST = "app.example.com"
+WEBHOOK_SECRET = "whsec_test_secret"
 
 
 class StaticSite:
@@ -109,12 +111,19 @@ class World:
         pem = private_key_pem()
         settings = {"auth_mode": "accounts", "secrets_key": Fernet.generate_key().decode(), "github_client_id": "cid",
                     "github_client_secret": "csec", "public_url": "http://t", "allowed_hosts": ["t"], "github_app_id": "1",
-                    "github_app_private_key": pem, "allowed_site_ports": [443, site.port], "max_concurrent_runs": 3, **(gh_extra or {})}
+                    "github_app_private_key": pem, "allowed_site_ports": [443, site.port], "max_concurrent_runs": 3, "github_webhook_secret": WEBHOOK_SECRET,
+                    **(gh_extra or {})}
         cfg = Settings(**settings)
         self.guards: list[BrowserGuard] = []
 
+        self.trusted = {HOST: "127.0.0.1"}  # names that resolve to the local test servers; tests may add more
+        self.ports = [443, site.port]
+
+        async def resolve(host, port):  # a real resolver would refuse these; nothing in a test may touch the internet
+            raise UnsafeAddress(f"{host} points at a private or reserved address")
+
         def guard():
-            g = BrowserGuard(SafeProxy(trusted={HOST: "127.0.0.1"}, allowed_ports=(443, site.port)),
+            g = BrowserGuard(SafeProxy(resolve=resolve, trusted=dict(self.trusted), allowed_ports=tuple(self.ports)),
                              browser_args=["--ignore-certificate-errors"])
             self.guards.append(g)
             return g

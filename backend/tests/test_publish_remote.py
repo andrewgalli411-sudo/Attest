@@ -95,7 +95,7 @@ async def test_a_missing_decision_or_the_wrong_person_publishes_nothing(world):
         await decide(alice, rows, label="accept_pr")
         assert (await bob.post(f"/api/runs/{rid}/publish", headers=H)).status_code == 404  # not bob's run
         assert (await alice.post(f"/api/runs/{rid}/publish")).status_code == 403  # no CSRF header
-        git = world.gh.repos["alice/web"]["obj"]
+        git = world.gh.repo_obj("alice/web")
         assert git.pulls == [] and list(git.refs) == ["refs/heads/main"]
 
 

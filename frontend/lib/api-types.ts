@@ -166,6 +166,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/github/webhook": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Github Webhook */
+        post: operations["github_webhook_api_github_webhook_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/health": {
         parameters: {
             query?: never;
@@ -836,7 +853,7 @@ export interface components {
             proof: string;
             /**
              * Remote
-             * @description open | server_only | not_publishable
+             * @description open | merged | closed | server_only | not_publishable
              */
             remote: string;
             /**
@@ -1680,6 +1697,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ReposOut"];
+                };
+            };
+        };
+    };
+    github_webhook_api_github_webhook_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
         };

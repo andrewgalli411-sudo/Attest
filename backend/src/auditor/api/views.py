@@ -157,7 +157,8 @@ def build_pull_requests(db, run: AuditRun) -> list[PullRequestRow]:
         decision = ("held_back" if not publishable else "accepted" if d and d.action == "accept_pr"
                     else "rejected" if d and d.action == "reject_pr" else "awaiting")
         file, added, removed = _diff_stats(fa.diff)
-        remote = "open" if fa.pr_url else ("server_only" if publishable else "not_publishable")
+        remote = (fa.status if fa.status in ("merged", "closed") and fa.pr_url else "open" if fa.pr_url
+                  else "server_only" if publishable else "not_publishable")
         rows.append(PullRequestRow(
             finding_id=f.id, rule_id=f.rule_id, sc_ids=f.sc_ids, severity=f.severity.value,
             page=(ps.state_label or urlsplit(ps.url).path) if ps else "", tier=fa.tier_pr, branch=fa.branch, file=file,

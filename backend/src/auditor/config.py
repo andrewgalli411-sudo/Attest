@@ -37,6 +37,11 @@ class Settings(BaseSettings):
     # Which sites an account may attach. https on 443 only, unless the operator widens it (development and tests).
     allow_insecure_sites: bool = False
     allowed_site_ports: list[int] = [443]
+    # Where a pull request's preview deployment may live. A preview address arrives in a webhook, so it is untrusted: it must
+    # be on the verified site's own domain, match the project's preview pattern, or sit on one of these platforms.
+    preview_host_suffixes: list[str] = [".vercel.app", ".netlify.app", ".pages.dev", ".onrender.com", ".fly.dev"]
+    max_webhook_bytes: int = 1024 * 1024
+    max_concurrent_proofs: int = 2
     github_web_base: str = "https://github.com"
     github_api_base: str = "https://api.github.com"
 

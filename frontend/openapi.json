@@ -1283,7 +1283,7 @@
             "type": "string"
           },
           "remote": {
-            "description": "open | server_only | not_publishable",
+            "description": "open | merged | closed | server_only | not_publishable",
             "title": "Remote",
             "type": "string"
           },
@@ -2751,6 +2751,22 @@
           }
         },
         "summary": "List Repos"
+      }
+    },
+    "/api/github/webhook": {
+      "post": {
+        "operationId": "github_webhook_api_github_webhook_post",
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Github Webhook"
       }
     },
     "/api/health": {

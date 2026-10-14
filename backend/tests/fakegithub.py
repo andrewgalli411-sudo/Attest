@@ -24,6 +24,7 @@ class FakeRepo:
         self.objects: dict[str, dict] = {}
         self.refs: dict[str, str] = {}
         self.pulls: list[dict] = []
+        self.comments: list[dict] = []
         self.writable = True
         files: dict[str, tuple[str, str]] = {}
         with tarfile.open(fileobj=io.BytesIO(tarball), mode="r:gz") as t:
@@ -164,7 +165,6 @@ class FakeGitHub:
         if not m or m.group(1) not in self.repos:
             return httpx.Response(404, json={"message": f"fake GitHub has no {req.method} {path}"})
         full, rest = m.group(1), m.group(2)
-        repo = self.repo_obj(full)
         data = json.loads(req.content) if req.content else {}
         if rest.startswith("commits/"):
             return httpx.Response(200, json={"sha": self.repos[full]["sha"]})
@@ -175,6 +175,7 @@ class FakeGitHub:
             if e.get("redirect"):
                 return httpx.Response(302, headers={"location": f"https://codeload.github.com/codeload/{full.replace('/', '__')}/tar/{rest.split('/')[1]}"})
             return httpx.Response(200, content=e["tarball"])
+        repo = self.repo_obj(full)  # only the git-data endpoints below need the object store, so it is built on first use
         if req.method != "GET" and not repo.writable:
             return httpx.Response(403, json={"message": "Resource not accessible by integration"})
         mm = re.fullmatch(r"git/commits/(\w+)", rest)
@@ -206,6 +207,10 @@ class FakeGitHub:
         if rest == "pulls" and req.method == "GET":
             head = req.url.params.get("head", "").split(":")[-1]
             return httpx.Response(200, json=[p for p in repo.pulls if p["head"]["ref"] == head])
+        mm = re.fullmatch(r"issues/(\d+)/comments", rest)
+        if mm and req.method == "POST":
+            repo.comments.append({"number": int(mm.group(1)), "body": data["body"]})
+            return httpx.Response(201, json={"id": len(repo.comments)})
         if rest == "pulls" and req.method == "POST":
             if getattr(repo, "fail_pulls", 0) > 0:  # a hiccup on GitHub's side, for retry tests
                 repo.fail_pulls -= 1

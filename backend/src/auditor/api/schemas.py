@@ -279,7 +279,7 @@ class PullRequestRow(BaseModel):
     removed: int = 0
     proof: str = Field(description="proved | not_retested | fix_failed | regression")
     decision: str = Field(description="awaiting | accepted | rejected | held_back")
-    remote: str = Field(description="open | server_only | not_publishable")
+    remote: str = Field(description="open | merged | closed | server_only | not_publishable")
     pr_url: str | None = None
     pr_number: int | None = None
 

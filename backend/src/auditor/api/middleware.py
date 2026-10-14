@@ -27,8 +27,9 @@ SECURITY_HEADERS = [
 
 
 class SecurityMiddleware:
-    def __init__(self, app, max_body: int = 64 * 1024):
+    def __init__(self, app, max_body: int = 64 * 1024, path_limits: dict[str, int] | None = None):
         self.app, self.max_body = app, max_body
+        self.path_limits = path_limits or {}  # a few endpoints (GitHub webhooks) legitimately receive larger bodies
 
     async def __call__(self, scope, receive, send):
         if scope["type"] != "http":
@@ -54,11 +55,11 @@ class SecurityMiddleware:
                 self._log(scope, rid, status[0], started)
                 return
             try:
-                too_big = int(cl) > self.max_body
+                too_big = int(cl) > self.path_limits.get(scope["path"], self.max_body)
             except ValueError:
                 too_big = True
             if too_big:
-                await reject(413, f"request body exceeds {self.max_body} bytes")
+                await reject(413, f"request body exceeds {self.path_limits.get(scope['path'], self.max_body)} bytes")
                 self._log(scope, rid, status[0], started)
                 return
 

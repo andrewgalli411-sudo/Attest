@@ -80,11 +80,15 @@ export function FindingReview({ runId, fid }: { runId: string; fid: string }) {
     api.dashboard(runId).then((d) => live && setDash(d)).catch((e: Error) => live && setError(e.message));
     return () => { live = false; };
   }, [runId]);
+  const waiting = f?.status === "pr_open";
   useEffect(() => {
     let live = true;
-    api.finding(fid).then((d) => { if (live) { setF(d); setError(null); } }).catch((e: Error) => live && setError(e.message));
-    return () => { live = false; };
-  }, [fid]);
+    const load = () => api.finding(fid).then((d) => { if (live) { setF(d); setError(null); } }).catch((e: Error) => live && setError(e.message));
+    load();
+    // While a pull request waits for its preview deployment, check back: the proof arrives on its own.
+    const timer = waiting ? setInterval(load, 8000) : undefined;
+    return () => { live = false; if (timer) clearInterval(timer); };
+  }, [fid, waiting]);
 
   const all = useMemo(() => (dash ? flatten(dash) : []), [dash]);
   const list = useMemo(() => all.filter((x) => matches(x, filter)), [all, filter]);
@@ -244,7 +248,9 @@ export function FindingReview({ runId, fid }: { runId: string; fid: string }) {
                     <p className="m-0 max-w-[640px]">
                       <strong className="text-warn">Not proved yet.</strong>{" "}
                       {f.mode === "remote"
-                        ? "Attest does not build your site, so this fix has not been tested. After you open the pull request, its preview deployment is re-audited and the result appears here."
+                        ? f.status === "pr_open"
+                          ? "The pull request is open. When its preview deployment is ready, Attest re-audits this element there and the result appears here, with a comment on the pull request."
+                          : "Attest does not build your site, so this fix has not been tested. After you open the pull request, its preview deployment is re-audited and the result appears here."
                         : "This fix has not been re-tested on a patched build yet."}
                     </p>
                   </Step>

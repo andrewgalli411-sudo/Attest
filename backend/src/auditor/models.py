@@ -117,6 +117,31 @@ class ProjectRecord(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
+class WebhookDelivery(Base):
+    """GitHub's delivery id for every webhook we accepted, so a replayed or redelivered event is ignored."""
+
+    __tablename__ = "webhook_delivery"
+    id: Mapped[str] = mapped_column(String(100), primary_key=True)
+    event: Mapped[str] = mapped_column(String(50))
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class ProofJob(Base):
+    """Re-auditing one pull request's preview deployment. Unique per (run, branch, deployed commit), so a repeated event is one job."""
+
+    __tablename__ = "proof_job"
+    __table_args__ = (UniqueConstraint("run_id", "branch", "deployment_sha"),)
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_id)
+    run_id: Mapped[str] = mapped_column(ForeignKey("audit_run.id"), index=True)
+    branch: Mapped[str] = mapped_column(String(200))
+    deployment_sha: Mapped[str] = mapped_column(String(64))
+    preview_url: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(16), default="queued")  # queued | running | done | skipped | failed
+    detail: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class AuditRun(Base):
     __tablename__ = "audit_run"
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_id)

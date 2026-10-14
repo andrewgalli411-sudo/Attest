@@ -17,6 +17,7 @@ from .api.accounts import router as accounts_router
 from .api.middleware import SecurityMiddleware
 from .api.projects import router as projects_router
 from .api.routes import TERMINAL, router
+from .api.webhooks import router as webhooks_router
 from .config import Settings
 from .config import settings as default_settings
 from .disclaimers import DRAFT_BANNER
@@ -71,6 +72,8 @@ class Deps:
     github_factory: Callable | None = None  # (installation_id, 'owner/name') -> GitHubRepoClient
     scratch_root: str = ""
     publish_locks: dict[str, asyncio.Lock] = field(default_factory=dict)  # one publish at a time per run
+    proof_sem: asyncio.Semaphore = field(default_factory=lambda: asyncio.Semaphore(2))  # preview re-tests running at once
+    proof_tasks: set = field(default_factory=set)
     verify_last: dict[str, float] = field(default_factory=dict)  # project id -> when it was last checked
     log: logging.Logger = field(default_factory=lambda: log)
     tasks: dict[str, asyncio.Task] = field(default_factory=dict)
@@ -190,13 +193,13 @@ def create_app(sf: sessionmaker | None = None, *, store: EvidenceStore | None = 
         if n:
             log.warning("marked %d orphaned run(s) as failed", n)
         yield
-        for t in list(app.state.deps.tasks.values()):  # cancel in-flight runs on shutdown
+        for t in [*app.state.deps.tasks.values(), *app.state.deps.proof_tasks]:  # cancel in-flight work on shutdown
             t.cancel()
-        await asyncio.gather(*app.state.deps.tasks.values(), return_exceptions=True)
+        await asyncio.gather(*app.state.deps.tasks.values(), *app.state.deps.proof_tasks, return_exceptions=True)
 
     docs = {} if cfg.enable_docs else {"docs_url": None, "redoc_url": None, "openapi_url": None}
     app = FastAPI(title="WCAG Auditor", description=DRAFT_BANNER, lifespan=lifespan, **docs)
-    app.add_middleware(SecurityMiddleware, max_body=cfg.max_request_bytes)
+    app.add_middleware(SecurityMiddleware, max_body=cfg.max_request_bytes, path_limits={"/api/github/webhook": cfg.max_webhook_bytes})
     app.add_middleware(CORSMiddleware, allow_origins=cfg.cors_origins, allow_methods=["GET", "POST"],
                        allow_headers=["Authorization", "Content-Type", "Last-Event-ID", "X-Requested-With"])
     app.state.deps = Deps(sf=sf, store=store or EvidenceStore(cfg.evidence_dir), bus=EventBus(sf),
@@ -205,9 +208,11 @@ def create_app(sf: sessionmaker | None = None, *, store: EvidenceStore | None = 
                           guard_factory=guard_factory or (lambda: BrowserGuard(SafeProxy())),
                           github_factory=github_factory or _default_github(cfg),
                           scratch_root=str(Path(work_dir or cfg.evidence_dir) / "scratch"),
+                          proof_sem=asyncio.Semaphore(cfg.max_concurrent_proofs),
                           net=SafeNet(allow_insecure=cfg.allow_insecure_sites, allowed_ports=tuple(cfg.allowed_site_ports)))
     app.include_router(accounts_router)
     app.include_router(projects_router)
+    app.include_router(webhooks_router)
     app.include_router(router)
 
     @app.get("/api/health")
