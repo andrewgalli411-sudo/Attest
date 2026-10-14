@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import secrets
+import time
+from datetime import UTC, datetime
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -10,9 +12,19 @@ from sqlalchemy import func, select, update
 
 from ..models import AuditRun, ProjectRecord, UserSession
 from ..netguard import UnsafeAddress, parse_site_url
+from ..safe_net import FetchError
 from ..scm.github_user import GitHubAuthExpired, GitHubError, GitHubUser
 from .auth import Principal, require_auth
-from .schemas import ProjectIn, ProjectOut, ProjectPatch, RepoOut, ReposOut, VerificationHelp
+from .schemas import (
+    ProjectIn,
+    ProjectOut,
+    ProjectPatch,
+    RepoOut,
+    ReposOut,
+    VerificationHelp,
+    VerifyCheck,
+    VerifyOut,
+)
 
 router = APIRouter(prefix="/api", dependencies=[Depends(require_auth)])
 TERMINAL = {"complete", "failed", "cancelled", "reviewed", "exported"}
@@ -198,3 +210,52 @@ def delete_project(project_id: str, d=Depends(_deps), who: Principal = Depends(r
         db.execute(update(AuditRun).where(AuditRun.project_id == p.id).values(project_id=None))  # past runs stay
         db.delete(p)
         db.commit()
+
+
+VERIFY_COOLDOWN_S = 3.0
+
+
+@router.post("/projects/{project_id}/verify", response_model=VerifyOut)
+async def verify_project(project_id: str, d=Depends(_deps), who: Principal = Depends(require_auth)):
+    """Prove the site is yours: a file at /.well-known/attest-verification.txt, or a DNS TXT record. Either one is enough."""
+    _accounts_only(d, who)
+    with d.sf() as db:
+        p = get_project(db, project_id, who)
+        token, site_url, already = p.verification_token, p.site_url, p.verified_at is not None
+    if already:
+        return VerifyOut(verified=True, method="already")
+    last = d.verify_last.get(project_id, 0.0)
+    if time.monotonic() - last < VERIFY_COOLDOWN_S:
+        raise HTTPException(429, "wait a few seconds before checking again", headers={"Retry-After": str(int(VERIFY_COOLDOWN_S))})
+    d.verify_last[project_id] = time.monotonic()
+
+    site = _site(d, site_url)
+    want = f"attest-verification={token}"
+    checks: list[VerifyCheck] = []
+    try:
+        got = await d.net.get_text(f"{site.origin}{VERIFY_PATH}")
+        lines = [ln.strip() for ln in got.text.splitlines()]
+        if got.status == 200 and want in lines:
+            checks.append(VerifyCheck(method="file", ok=True, detail=f"found the code at {site.origin}{VERIFY_PATH}"))
+        elif got.status == 200:
+            checks.append(VerifyCheck(method="file", ok=False, detail="the file exists but does not contain your code"))
+        else:
+            checks.append(VerifyCheck(method="file", ok=False, detail=f"{site.origin}{VERIFY_PATH} answered {got.status}"))
+    except (UnsafeAddress, FetchError) as e:
+        checks.append(VerifyCheck(method="file", ok=False, detail=str(e)))
+    try:
+        records = await d.net.txt_records(f"_attest-challenge.{site.host}")
+        ok = want in [r.strip() for r in records]
+        checks.append(VerifyCheck(method="dns", ok=ok, detail="found the TXT record" if ok else
+                                  ("the name has TXT records but none with your code" if records else "no TXT record found")))
+    except FetchError as e:
+        checks.append(VerifyCheck(method="dns", ok=False, detail=str(e)))
+
+    winner = next((c.method for c in checks if c.ok), None)
+    if winner:
+        with d.sf() as db:
+            row = get_project(db, project_id, who)
+            if row.site_url == site_url:  # the address did not change while we were checking
+                row.verified_at = datetime.now(UTC)
+                db.commit()
+    return VerifyOut(verified=winner is not None, method=winner, checks=checks)

@@ -237,6 +237,26 @@ export interface paths {
         patch: operations["update_project_api_projects__project_id__patch"];
         trace?: never;
     };
+    "/api/projects/{project_id}/verify": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Verify Project
+         * @description Prove the site is yours: a file at /.well-known/attest-verification.txt, or a DNS TXT record. Either one is enough.
+         */
+        post: operations["verify_project_api_projects__project_id__verify_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/runs": {
         parameters: {
             query?: never;
@@ -1090,6 +1110,30 @@ export interface components {
             /** File Path */
             file_path: string;
         };
+        /** VerifyCheck */
+        VerifyCheck: {
+            /** Detail */
+            detail: string;
+            /**
+             * Method
+             * @description file | dns
+             */
+            method: string;
+            /** Ok */
+            ok: boolean;
+        };
+        /** VerifyOut */
+        VerifyOut: {
+            /** Checks */
+            checks?: components["schemas"]["VerifyCheck"][];
+            /**
+             * Method
+             * @description which proof worked: file | dns | already
+             */
+            method?: string | null;
+            /** Verified */
+            verified: boolean;
+        };
     };
     responses: never;
     parameters: never;
@@ -1800,6 +1844,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProjectOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    verify_project_api_projects__project_id__verify_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VerifyOut"];
                 };
             };
             /** @description Validation Error */

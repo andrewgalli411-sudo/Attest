@@ -7,6 +7,8 @@ from urllib.parse import urldefrag, urljoin, urlsplit, urlunsplit
 
 from playwright.async_api import Browser
 
+from .safe_browse import context_options
+
 SKIP_EXT = (".pdf", ".zip", ".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".mp4", ".mp3",
             ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".css", ".js", ".json", ".xml", ".ico")
 UA = "wcag-auditor"
@@ -52,7 +54,7 @@ async def crawl(
     queue: list[Discovered] = [Discovered(seed, 0)]
     pages: list[Discovered] = []
     skipped: list[dict] = []
-    ctx = await browser.new_context(bypass_csp=True)
+    ctx = await browser.new_context(bypass_csp=True, **context_options())
     try:
         while queue and len(pages) < max_pages:
             item = queue.pop(0)

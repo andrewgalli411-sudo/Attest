@@ -22,6 +22,7 @@ from .disclaimers import DRAFT_BANNER
 from .models import AuditRun, RunStatus
 from .pipeline.events import EventBus
 from .projects import Project, load_projects
+from .safe_net import SafeNet
 from .secrets import SecretsError, Vault
 from .storage.evidence_store import EvidenceStore
 
@@ -50,6 +51,8 @@ class Deps:
     cfg: Settings
     projects: dict[str, Project]
     vault: Vault | None = None
+    net: SafeNet | None = None
+    verify_last: dict[str, float] = field(default_factory=dict)  # project id -> when it was last checked
     log: logging.Logger = field(default_factory=lambda: log)
     tasks: dict[str, asyncio.Task] = field(default_factory=dict)
 
@@ -178,7 +181,8 @@ def create_app(sf: sessionmaker | None = None, *, store: EvidenceStore | None = 
                        allow_headers=["Authorization", "Content-Type", "Last-Event-ID", "X-Requested-With"])
     app.state.deps = Deps(sf=sf, store=store or EvidenceStore(cfg.evidence_dir), bus=EventBus(sf),
                           client_factory=client_factory or (lambda: default_client(cfg)),
-                          work_dir=work_dir or cfg.evidence_dir, cfg=cfg, projects=projects, vault=vault)
+                          work_dir=work_dir or cfg.evidence_dir, cfg=cfg, projects=projects, vault=vault,
+                          net=SafeNet(allow_insecure=cfg.allow_insecure_sites, allowed_ports=tuple(cfg.allowed_site_ports)))
     app.include_router(accounts_router)
     app.include_router(projects_router)
     app.include_router(router)

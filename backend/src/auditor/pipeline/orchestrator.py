@@ -24,6 +24,7 @@ from .crawler import crawl
 from .events import EventBus
 from .judge.judge import build_evidence_items, build_input, judge_bundle
 from .prober import probe_page
+from .safe_browse import launch_browser
 
 PROBE_CONCURRENCY = 2
 JUDGE_CONCURRENCY = 4
@@ -57,7 +58,7 @@ async def _run(run_id, sf, store, bus, judge_client, judge_model, max_pages, max
         seed, flows = run.target_url, list(run.flows or [])
 
     async with async_playwright() as pw:
-        browser = await pw.chromium.launch()
+        browser = await launch_browser(pw)
         try:
             # ---- crawl
             _set_status(sf, run_id, RunStatus.crawling)

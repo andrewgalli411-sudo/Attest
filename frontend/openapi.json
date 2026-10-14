@@ -2064,6 +2064,62 @@
         ],
         "title": "VerificationHelp",
         "type": "object"
+      },
+      "VerifyCheck": {
+        "properties": {
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          },
+          "method": {
+            "description": "file | dns",
+            "title": "Method",
+            "type": "string"
+          },
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "method",
+          "ok",
+          "detail"
+        ],
+        "title": "VerifyCheck",
+        "type": "object"
+      },
+      "VerifyOut": {
+        "properties": {
+          "checks": {
+            "items": {
+              "$ref": "#/components/schemas/VerifyCheck"
+            },
+            "title": "Checks",
+            "type": "array"
+          },
+          "method": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "which proof worked: file | dns | already",
+            "title": "Method"
+          },
+          "verified": {
+            "title": "Verified",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "verified"
+        ],
+        "title": "VerifyOut",
+        "type": "object"
       }
     }
   },
@@ -2888,6 +2944,46 @@
           }
         },
         "summary": "Update Project"
+      }
+    },
+    "/api/projects/{project_id}/verify": {
+      "post": {
+        "description": "Prove the site is yours: a file at /.well-known/attest-verification.txt, or a DNS TXT record. Either one is enough.",
+        "operationId": "verify_project_api_projects__project_id__verify_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VerifyOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Verify Project"
       }
     },
     "/api/runs": {

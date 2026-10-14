@@ -16,6 +16,7 @@ from .probes.keyboard_nav import keyboard_nav
 from .probes.keyboard_trap import keyboard_trap
 from .probes.modal_focus import modal_focus
 from .probes.name_role_value import name_role_value
+from .safe_browse import GUARD, context_options, launch_browser
 
 log = logging.getLogger(__name__)
 
@@ -52,7 +53,7 @@ async def _open(
     if not url.startswith(("http://", "https://")):
         raise PageUnauditable(f"unsupported scheme: {url.split(':', 1)[0]!r}")
     # bypass_csp: an auditor must be able to inject axe regardless of the page's CSP.
-    ctx = await browser.new_context(viewport=VIEWPORT, reduced_motion="reduce", bypass_csp=True)
+    ctx = await browser.new_context(viewport=VIEWPORT, reduced_motion="reduce", bypass_csp=True, **context_options())
     try:
         await apply_auth(ctx, auth, url)
         page = await ctx.new_page()
@@ -60,11 +61,17 @@ async def _open(
         try:
             resp = await page.goto(url, wait_until="load")
         except PlaywrightError as e:
+            guard = GUARD.get()
+            if guard is not None:
+                await guard.raise_if_tripped()  # the page failed BECAUSE the guard refused a connection: say that
             raise PageUnauditable(f"navigation failed: {str(e).splitlines()[0][:200]}") from e
         try:  # let client-side redirects / late scripts settle so we audit the final page
             await page.wait_for_load_state("networkidle", timeout=SETTLE_MS)
         except Exception:
             pass
+        guard = GUARD.get()
+        if guard is not None:
+            await guard.raise_if_tripped()  # a page that reached for a private address ends the run, not just the page
         if resp is None or resp.status >= 400:
             raise PageUnauditable(f"HTTP {resp.status if resp else 'no response'}")
         ctype = (resp.headers.get("content-type") or "").split(";")[0].strip().lower()
@@ -162,7 +169,7 @@ async def probe_page(
 
 async def probe_url(url: str) -> dict:
     async with async_playwright() as pw:
-        browser = await pw.chromium.launch()
+        browser = await launch_browser(pw)
         try:
             return await probe_page(browser, url)
         finally:

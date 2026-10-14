@@ -19,6 +19,7 @@ dependencies = [
   "pyjwt>=2.15.1",
   "cryptography>=50.0.2",
   "httpx>=0.28.1",
+  "dnspython>=2.9.0",
 ]
 
 [dependency-groups]

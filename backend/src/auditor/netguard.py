@@ -62,9 +62,10 @@ def parse_site_url(raw: str, *, allow_insecure: bool = False, allowed_ports: tup
     if "\\" in raw or "%" in u.netloc:
         raise UnsafeAddress("the address contains characters that are not allowed")
     try:
-        port = u.port or (443 if scheme == "https" else 80)
+        explicit = u.port  # 0 is a real (and wrong) answer, so compare with None rather than testing truthiness
     except ValueError:
         raise UnsafeAddress("the port in the address is not valid") from None
+    port = explicit if explicit is not None else (443 if scheme == "https" else 80)
     if port not in allowed_ports:
         raise UnsafeAddress(f"port {port} is not allowed; use one of {', '.join(map(str, allowed_ports))}")
     host = (u.hostname or "").rstrip(".").lower()

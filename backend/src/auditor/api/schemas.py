@@ -373,3 +373,15 @@ class RepoOut(BaseModel):
 class ReposOut(BaseModel):
     install_url: str | None = None
     repos: list[RepoOut]
+
+
+class VerifyCheck(BaseModel):
+    method: str = Field(description="file | dns")
+    ok: bool
+    detail: str
+
+
+class VerifyOut(BaseModel):
+    verified: bool
+    method: str | None = Field(None, description="which proof worked: file | dns | already")
+    checks: list[VerifyCheck] = Field(default_factory=list)

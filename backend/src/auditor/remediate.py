@@ -46,6 +46,7 @@ from .models import (
 )
 from .pipeline.events import EventBus
 from .pipeline.prober import _open
+from .pipeline.safe_browse import launch_browser
 from .reprove.devserver import dev_server
 from .reprove.regress import diff_snapshots, snapshot_state, weak_key
 from .reprove.reprove import check_on_build, decide, rebase_url
@@ -155,7 +156,7 @@ async def _run(run_id, sf, store, bus, client, cfg, provider, base_sha) -> dict:
     pages: list[dict] = []  # {id, label, path, steps, url}
 
     async with async_playwright() as pw:
-        browser = await pw.chromium.launch()
+        browser = await launch_browser(pw)
         try:
             # ============================ 1. DRIVE + DETECT (baseline, two passes) ============================
             _status(sf, run_id, RunStatus.detecting)
