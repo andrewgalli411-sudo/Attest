@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import AsyncIterator
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -31,6 +32,7 @@ from ..models import (
     TriageVerdict,
 )
 from ..pipeline.safe_browse import GUARD
+from ..ratelimit import limited
 from ..remediate import RemediationConfig, run_remediation
 from ..remote import RemoteConfig, run_remote_audit
 from ..report.html import run_report
@@ -183,9 +185,13 @@ def _resolve(body: StartRun, d, who: Principal | None = None) -> tuple[str, Reme
     raise RequestValidationError([{"type": "value_error", "loc": ["body"], "msg": "give a project name (or demo=true)", "input": None}])
 
 
-@router.post("/runs", response_model=RunOut, status_code=202)
+@router.post("/runs", response_model=RunOut, status_code=202, dependencies=[Depends(limited("runs", "rl_runs_per_min"))])
 async def start_run(body: StartRun, d=Depends(deps), who: Principal = Depends(require_auth)):
     target, cfg = _resolve(body, d, who)
+    if not who.is_local:
+        allowance = _enforce_quota(d, who)
+        if hasattr(cfg, "model_token_budget") and allowance is not None:
+            cfg.model_token_budget = min(cfg.model_token_budget, allowance)  # a run cannot spend more than the month has left
     if d.active_runs() >= d.cfg.max_concurrent_runs:
         raise HTTPException(429, "a run is already in progress; wait for it to finish or cancel it",
                             headers={"Retry-After": "30"})
@@ -201,6 +207,34 @@ async def start_run(body: StartRun, d=Depends(deps), who: Principal = Depends(re
                             headers={"Retry-After": "30"})
     d.spawn(out.id, _execute(d, out.id, body, cfg))
     return out
+
+
+def _enforce_quota(d, who: Principal) -> int | None:
+    """Fair use on a shared server. Raises 429 with a plain reason, or returns how many model tokens the person has left
+    this month (None if there is no cap)."""
+    now = datetime.now(UTC)
+    with d.sf() as db:
+        mine = db.scalars(select(AuditRun).where(AuditRun.owner_id == who.account_id)).all()
+    if d.cfg.max_runs_per_account > 0:
+        live = [r for r in mine if r.status not in TERMINAL and (r.id in d.tasks or d._last_seen(r) >= now - timedelta(seconds=75))]
+        if len(live) >= d.cfg.max_runs_per_account:
+            raise HTTPException(429, f"you already have {len(live)} run(s) in progress; wait for it to finish or cancel it",
+                                headers={"Retry-After": "30"})
+    if d.cfg.max_runs_per_day > 0:
+        recent = sorted(r.created_at if r.created_at.tzinfo else r.created_at.replace(tzinfo=UTC) for r in mine
+                        if (r.created_at if r.created_at.tzinfo else r.created_at.replace(tzinfo=UTC)) >= now - timedelta(hours=24))
+        if len(recent) >= d.cfg.max_runs_per_day:
+            wait = max(60, int((recent[0] + timedelta(hours=24) - now).total_seconds()))
+            raise HTTPException(429, f"daily limit reached ({d.cfg.max_runs_per_day} runs in 24 hours); the oldest frees up in about "
+                                f"{max(1, wait // 60)} minutes", headers={"Retry-After": str(wait)})
+    if d.cfg.monthly_model_token_cap > 0:
+        month = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        used = sum(r.model_tokens or 0 for r in mine if (r.created_at if r.created_at.tzinfo else r.created_at.replace(tzinfo=UTC)) >= month)
+        left = d.cfg.monthly_model_token_cap - used
+        if left <= 0:
+            raise HTTPException(429, "this month's language-model allowance is used up; it resets at the start of next month")
+        return left
+    return None
 
 
 def _resolve_remote(body: StartRun, d, who: Principal) -> tuple[str, RemoteConfig]:
@@ -455,7 +489,7 @@ def pull_requests(run_id: str, d=Depends(deps), who: Principal = Depends(require
         published=sum(r.remote == "open" for r in rows))
 
 
-@router.post("/runs/{run_id}/publish", response_model=PublishOut)
+@router.post("/runs/{run_id}/publish", response_model=PublishOut, dependencies=[Depends(limited("publish", "rl_publish_per_min"))])
 async def publish(run_id: str, d=Depends(deps), who: Principal = Depends(require_auth)):
     """Push the fixes a person accepted (and that were proved) and open pull requests for them."""
     with d.sf() as db:

@@ -80,6 +80,7 @@ class Account(Base):
     avatar_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    disabled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)  # operator switch: no access
 
 
 class UserSession(Base):
@@ -159,6 +160,7 @@ class AuditRun(Base):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # Stamped every few seconds by whichever process owns the run; a stale stamp means the owner died.
     heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    model_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)  # language-model tokens this run spent (counts toward the cap)
     page_states: Mapped[list[PageState]] = relationship(back_populates="run")
 
 

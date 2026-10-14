@@ -12,9 +12,10 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import RedirectResponse, Response
 from pydantic import BaseModel
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 
-from ..models import Account, UserSession
+from ..models import Account, AuditRun, ProjectRecord, UserSession
+from ..ratelimit import limited
 from .auth import SESSION_COOKIE, Principal, check_host, hash_token, require_auth, session_principal
 
 STATE_COOKIE = "attest_oauth"
@@ -75,7 +76,7 @@ def auth_config(request: Request):
     return AuthConfig(mode=cfg.auth_mode, signed_in=who is not None or cfg.auth_mode != "accounts", login=who.login if who else None)
 
 
-@router.get("/auth/github/login")
+@router.get("/auth/github/login", dependencies=[Depends(limited("login", "rl_login_per_min", by="address"))])
 def github_login(request: Request, next: str | None = Query(None, max_length=300)):
     check_host(request)
     cfg = request.app.state.deps.cfg
@@ -90,7 +91,7 @@ def github_login(request: Request, next: str | None = Query(None, max_length=300
     return resp
 
 
-@router.get("/auth/github/callback")
+@router.get("/auth/github/callback", dependencies=[Depends(limited("login", "rl_login_per_min", by="address"))])
 async def github_callback(request: Request, code: str = Query("", max_length=200), state: str = Query("", max_length=200)):
     check_host(request)
     d = request.app.state.deps
@@ -121,6 +122,8 @@ async def github_callback(request: Request, code: str = Query("", max_length=200
         if acct is None:
             acct = Account(github_id=int(gh["id"]), login=gh["login"])
             db.add(acct)
+        if acct.disabled_at is not None:
+            raise HTTPException(403, "this account has been disabled by the operator of this server")
         acct.login, acct.name, acct.avatar_url, acct.last_seen_at = gh["login"], gh.get("name"), gh.get("avatar_url"), now
         db.flush()
         db.execute(delete(UserSession).where(UserSession.expires_at < now))  # housekeeping
@@ -154,3 +157,32 @@ def me(request: Request, who: Principal = Depends(require_auth)):
     with d.sf() as db:
         a = db.get(Account, who.account_id)
         return Me(mode="accounts", login=a.login, name=a.name, avatar_url=a.avatar_url)
+
+
+class Usage(BaseModel):
+    runs_today: int
+    runs_per_day: int
+    model_tokens_this_month: int
+    model_tokens_cap: int
+    projects: int
+    projects_max: int
+
+
+@router.get("/usage", response_model=Usage)
+def usage(request: Request, who: Principal = Depends(require_auth)):
+    """What this person has used of their fair-use allowance. 0 for a limit means there is none."""
+    d = request.app.state.deps
+    if who.is_local:
+        raise HTTPException(404, "usage limits only apply on a multi-user server")
+    now = datetime.now(UTC)
+    month = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+    def aware(t):
+        return t if t.tzinfo else t.replace(tzinfo=UTC)
+    with d.sf() as db:
+        runs = db.scalars(select(AuditRun).where(AuditRun.owner_id == who.account_id)).all()
+        n_projects = db.scalar(select(func.count()).select_from(ProjectRecord).where(ProjectRecord.owner_id == who.account_id))
+    return Usage(
+        runs_today=sum(aware(r.created_at) >= now - timedelta(hours=24) for r in runs), runs_per_day=d.cfg.max_runs_per_day,
+        model_tokens_this_month=sum(r.model_tokens or 0 for r in runs if aware(r.created_at) >= month),
+        model_tokens_cap=d.cfg.monthly_model_token_cap, projects=n_projects or 0, projects_max=d.cfg.max_projects_per_account)

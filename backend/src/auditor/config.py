@@ -41,6 +41,20 @@ class Settings(BaseSettings):
     # be on the verified site's own domain, match the project's preview pattern, or sit on one of these platforms.
     preview_host_suffixes: list[str] = [".vercel.app", ".netlify.app", ".pages.dev", ".onrender.com", ".fly.dev"]
     max_webhook_bytes: int = 1024 * 1024
+
+    # ---- fair use on a shared server (accounts mode). 0 turns a limit off.
+    max_runs_per_account: int = 1  # audits one person may have running at once
+    max_runs_per_day: int = 20  # runs one person may start in any 24 hours
+    monthly_model_token_cap: int = 5_000_000  # language-model tokens one person may spend per calendar month (UTC)
+    # How many reverse proxies sit in front of the API and are trusted to set X-Forwarded-For. 0 = ignore the header (a caller
+    # could write anything in it), which is right unless you run behind a proxy you control.
+    trusted_proxy_hops: int = 0
+    rl_login_per_min: int = 30  # per address: sign-in start and callback
+    rl_projects_per_min: int = 10  # per account: creating and verifying projects
+    rl_runs_per_min: int = 6  # per account: starting runs
+    rl_repos_per_min: int = 30  # per account: listing repositories (each call asks GitHub)
+    rl_publish_per_min: int = 10  # per account: opening pull requests
+    rl_webhook_per_min: int = 600  # per address: webhook deliveries
     max_concurrent_proofs: int = 2
     github_web_base: str = "https://github.com"
     github_api_base: str = "https://api.github.com"

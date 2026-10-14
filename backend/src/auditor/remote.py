@@ -33,6 +33,7 @@ from .remediate import (
     _record_page_failure,
     _status,
     _summarise,
+    record_tokens,
 )
 from .scm.github_repo import GitHubRepoClient
 from .scm.local_git import LocalGitProvider
@@ -141,6 +142,7 @@ async def run_remote_audit(run_id: str, sf, store, bus, client, rc: RemoteConfig
         bus.emit(run_id, "error", {"stage": "run", "error": f"{type(e).__name__}: {e}"})
         raise
     finally:
+        record_tokens(sf, run_id, client)
         shutil.rmtree(workdir, ignore_errors=True)  # customer source does not stay on our disk
 
 

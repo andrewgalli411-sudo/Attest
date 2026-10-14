@@ -26,6 +26,7 @@ from .pipeline.events import EventBus
 from .pipeline.safe_browse import BrowserGuard
 from .pipeline.safe_proxy import SafeProxy
 from .projects import Project, load_projects
+from .ratelimit import RateLimiter
 from .safe_net import SafeNet
 from .scm.github_app import GitHubAppAuth
 from .scm.github_repo import GitHubRepoClient
@@ -72,6 +73,7 @@ class Deps:
     github_factory: Callable | None = None  # (installation_id, 'owner/name') -> GitHubRepoClient
     scratch_root: str = ""
     publish_locks: dict[str, asyncio.Lock] = field(default_factory=dict)  # one publish at a time per run
+    limiter: RateLimiter = field(default_factory=RateLimiter)
     proof_sem: asyncio.Semaphore = field(default_factory=lambda: asyncio.Semaphore(2))  # preview re-tests running at once
     proof_tasks: set = field(default_factory=set)
     verify_last: dict[str, float] = field(default_factory=dict)  # project id -> when it was last checked
@@ -115,8 +117,15 @@ class Deps:
         with self.sf() as db:
             rows = db.scalars(select(AuditRun).where(AuditRun.status.notin_(list(TERMINAL)))
                               .order_by(AuditRun.created_at, AuditRun.id)).all()
-            live = [r.id for r in rows if r.id in self.tasks or r.id == run_id or self._last_seen(r) >= cutoff]
-        return run_id in live[: self.cfg.max_concurrent_runs]
+            live_rows = [r for r in rows if r.id in self.tasks or r.id == run_id or self._last_seen(r) >= cutoff]
+            live = [r.id for r in live_rows]
+            if run_id not in live[: self.cfg.max_concurrent_runs]:
+                return False
+            me = next((r for r in live_rows if r.id == run_id), None)
+            if me is not None and me.owner_id and self.cfg.max_runs_per_account > 0:  # the same rule, per person
+                mine = [r.id for r in live_rows if r.owner_id == me.owner_id]
+                return run_id in mine[: self.cfg.max_runs_per_account]
+            return True
 
     def withdraw(self, run_id: str) -> None:
         with self.sf() as db:

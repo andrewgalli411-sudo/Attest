@@ -79,12 +79,18 @@ def session_principal(request: Request) -> Principal | None:
         if expires <= datetime.now(UTC):
             return None
         acct = db.get(Account, row.account_id)
-        if acct is None:
+        if acct is None or acct.disabled_at is not None:  # an operator can switch an account off
             return None
         return Principal(account_id=acct.id, login=acct.login, session_id=row.id)
 
 
 async def require_auth(request: Request) -> Principal:
+    who = await _authenticate(request)
+    request.state.principal = who  # for the rate limiter, which runs after authentication
+    return who
+
+
+async def _authenticate(request: Request) -> Principal:
     check_host(request)
     cfg = request.app.state.deps.cfg
     if cfg.auth_mode == "accounts":

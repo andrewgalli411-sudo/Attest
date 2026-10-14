@@ -90,6 +90,15 @@ class RemediationConfig:
                 "max_fixes": self.max_fixes, "auth_keys": sorted((self.auth or {}).keys())}
 
 
+def record_tokens(sf: sessionmaker, run_id: str, client) -> None:
+    """Remember how many language-model tokens this run spent, whether it finished or failed: it counts toward the monthly cap."""
+    with sf() as db:
+        run = db.get(AuditRun, run_id)
+        if run is not None:
+            run.model_tokens = int(getattr(client, "used", 0) or 0)
+            db.commit()
+
+
 def _status(sf: sessionmaker, run_id: str, status: RunStatus, **kw) -> None:
     with sf() as db:
         run = db.get(AuditRun, run_id)
@@ -141,6 +150,7 @@ async def run_remediation(
         bus.emit(run_id, "error", {"stage": "run", "error": f"{type(e).__name__}: {e}"})
         raise
     finally:
+        record_tokens(sf, run_id, client)
         if began:  # never `checkout -f` over changes that are the user's, not ours
             try:
                 provider.restore(cfg.base_branch)  # leave the repo where we found it

@@ -420,6 +420,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/usage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Usage
+         * @description What this person has used of their fair-use allowance. 0 for a limit means there is none.
+         */
+        get: operations["usage_api_usage_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1117,6 +1137,21 @@ export interface components {
             tier: string;
             /** Valid */
             valid: boolean;
+        };
+        /** Usage */
+        Usage: {
+            /** Model Tokens Cap */
+            model_tokens_cap: number;
+            /** Model Tokens This Month */
+            model_tokens_this_month: number;
+            /** Projects */
+            projects: number;
+            /** Projects Max */
+            projects_max: number;
+            /** Runs Per Day */
+            runs_per_day: number;
+            /** Runs Today */
+            runs_today: number;
         };
         /** ValidationError */
         ValidationError: {
@@ -2845,6 +2880,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    usage_api_usage_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Usage"];
                 };
             };
         };

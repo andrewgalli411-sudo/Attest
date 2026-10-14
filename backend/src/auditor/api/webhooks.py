@@ -14,7 +14,7 @@ import hmac
 import json
 import re
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 
@@ -22,6 +22,7 @@ from ..models import AuditRun, Finding, FixAttempt, ProjectRecord, ProofJob, Web
 from ..netguard import UnsafeAddress
 from ..preview import preview_allowed
 from ..proof import PROOF_TIMEOUT_S, prove_preview
+from ..ratelimit import limited
 from .auth import check_host
 
 router = APIRouter(prefix="/api")
@@ -35,7 +36,7 @@ def signature_ok(secret: str, body: bytes, header: str) -> bool:
     return hmac.compare_digest(header[7:], hmac.new(secret.encode(), body, hashlib.sha256).hexdigest())
 
 
-@router.post("/github/webhook", status_code=202)
+@router.post("/github/webhook", status_code=202, dependencies=[Depends(limited("webhook", "rl_webhook_per_min", by="address"))])
 async def github_webhook(request: Request):
     check_host(request)
     d = request.app.state.deps

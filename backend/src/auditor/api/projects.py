@@ -12,6 +12,7 @@ from sqlalchemy import func, select, update
 
 from ..models import AuditRun, ProjectRecord, UserSession
 from ..netguard import UnsafeAddress, parse_site_url
+from ..ratelimit import limited
 from ..safe_net import FetchError
 from ..scm.github_user import GitHubAuthExpired, GitHubError, GitHubUser
 from .auth import Principal, require_auth
@@ -94,7 +95,7 @@ async def _github(request: Request, who: Principal) -> GitHubUser:
                       transport=getattr(request.app.state, "github_transport", None))
 
 
-@router.get("/github/repos", response_model=ReposOut)
+@router.get("/github/repos", response_model=ReposOut, dependencies=[Depends(limited("repos", "rl_repos_per_min"))])
 async def list_repos(request: Request, d=Depends(_deps), who: Principal = Depends(require_auth)):
     """The repositories this person can reach through an installation of the Attest GitHub App."""
     _accounts_only(d, who)
@@ -126,7 +127,7 @@ def list_projects(d=Depends(_deps), who: Principal = Depends(require_auth)):
         return [_out(d, p) for p in rows]
 
 
-@router.post("/projects", response_model=ProjectOut, status_code=201)
+@router.post("/projects", response_model=ProjectOut, status_code=201, dependencies=[Depends(limited("projects", "rl_projects_per_min"))])
 async def create_project(body: ProjectIn, request: Request, d=Depends(_deps), who: Principal = Depends(require_auth)):
     _accounts_only(d, who)
     site = _site(d, body.site_url)
@@ -215,7 +216,7 @@ def delete_project(project_id: str, d=Depends(_deps), who: Principal = Depends(r
 VERIFY_COOLDOWN_S = 3.0
 
 
-@router.post("/projects/{project_id}/verify", response_model=VerifyOut)
+@router.post("/projects/{project_id}/verify", response_model=VerifyOut, dependencies=[Depends(limited("projects", "rl_projects_per_min"))])
 async def verify_project(project_id: str, d=Depends(_deps), who: Principal = Depends(require_auth)):
     """Prove the site is yours: a file at /.well-known/attest-verification.txt, or a DNS TXT record. Either one is enough."""
     _accounts_only(d, who)

@@ -2012,6 +2012,44 @@
         "title": "TriageOut",
         "type": "object"
       },
+      "Usage": {
+        "properties": {
+          "model_tokens_cap": {
+            "title": "Model Tokens Cap",
+            "type": "integer"
+          },
+          "model_tokens_this_month": {
+            "title": "Model Tokens This Month",
+            "type": "integer"
+          },
+          "projects": {
+            "title": "Projects",
+            "type": "integer"
+          },
+          "projects_max": {
+            "title": "Projects Max",
+            "type": "integer"
+          },
+          "runs_per_day": {
+            "title": "Runs Per Day",
+            "type": "integer"
+          },
+          "runs_today": {
+            "title": "Runs Today",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "runs_today",
+          "runs_per_day",
+          "model_tokens_this_month",
+          "model_tokens_cap",
+          "projects",
+          "projects_max"
+        ],
+        "title": "Usage",
+        "type": "object"
+      },
       "ValidationError": {
         "properties": {
           "ctx": {
@@ -4057,6 +4095,25 @@
           }
         },
         "summary": "Status"
+      }
+    },
+    "/api/usage": {
+      "get": {
+        "description": "What this person has used of their fair-use allowance. 0 for a limit means there is none.",
+        "operationId": "usage_api_usage_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Usage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Usage"
       }
     }
   }

@@ -30,10 +30,13 @@ from .models import (
     JudgeProposal,
     PageScore,
     PageState,
+    ProofJob,
     RegressionCheck,
     ReproveResult,
     RunEvent,
     TriageVerdict,
+    UserSession,
+    WebhookDelivery,
 )
 from .storage.evidence_store import EvidenceStore
 
@@ -63,6 +66,7 @@ def _delete_run(db, run_id: str) -> None:
         db.execute(delete(AuditorRuling).where(AuditorRuling.bundle_id.in_(bundles)))
         db.execute(delete(JudgeProposal).where(JudgeProposal.bundle_id.in_(bundles)))
         db.execute(delete(EvidenceBundle).where(EvidenceBundle.id.in_(bundles)))
+    db.execute(delete(ProofJob).where(ProofJob.run_id == run_id))
     db.execute(delete(PageScore).where(PageScore.run_id == run_id))
     db.execute(delete(CriterionRollup).where(CriterionRollup.run_id == run_id))
     db.execute(delete(ExportArtifact).where(ExportArtifact.run_id == run_id))
@@ -90,6 +94,16 @@ def purge_runs(sf: sessionmaker, store: EvidenceStore, older_than: timedelta, *,
     return done
 
 
+def purge_housekeeping(sf: sessionmaker, *, now: datetime | None = None, deliveries_days: int = 30) -> dict[str, int]:
+    """Things that only ever pile up: expired sign-in sessions, and the ids of webhook deliveries we have already handled
+    (kept long enough to recognise a redelivery, not forever)."""
+    now = now or datetime.now(UTC)
+    with sf() as db, db.begin():
+        sessions = db.execute(delete(UserSession).where(UserSession.expires_at < now)).rowcount
+        deliveries = db.execute(delete(WebhookDelivery).where(WebhookDelivery.received_at < now - timedelta(days=deliveries_days))).rowcount
+    return {"expired_sessions": sessions, "old_webhook_deliveries": deliveries}
+
+
 def main() -> None:
     from .config import settings
     from .db import SessionLocal
@@ -102,6 +116,8 @@ def main() -> None:
         ap.error("--days must be at least 1")
     ids = purge_runs(SessionLocal, EvidenceStore(settings.evidence_dir), timedelta(days=a.days), dry_run=a.dry_run)
     print(f"{'would delete' if a.dry_run else 'deleted'} {len(ids)} run(s)")
+    if not a.dry_run:
+        print("housekeeping:", purge_housekeeping(SessionLocal))
 
 
 if __name__ == "__main__":
