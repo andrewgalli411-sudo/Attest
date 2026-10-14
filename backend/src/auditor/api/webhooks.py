@@ -40,7 +40,7 @@ async def github_webhook(request: Request):
     check_host(request)
     d = request.app.state.deps
     if not d.cfg.github_webhook_secret:
-        raise HTTPException(503, "webhooks are not configured on this server")
+        raise HTTPException(404, "webhooks are not enabled on this server")  # a feature this server lacks looks absent, not broken
     body = await request.body()  # its size was capped (and a Content-Length required) before we got here
     if not signature_ok(d.cfg.github_webhook_secret, body, request.headers.get("x-hub-signature-256", "")):
         raise HTTPException(401, "bad signature")

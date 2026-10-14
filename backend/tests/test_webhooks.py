@@ -200,13 +200,13 @@ async def test_a_replayed_delivery_is_acknowledged_once_and_does_nothing_twice(w
             site.close()
 
 
-async def test_a_secret_must_be_configured_for_webhooks_to_work(sf, tmp_path, demo_build, site):
+async def test_webhooks_are_absent_until_a_secret_is_configured(sf, tmp_path, demo_build, site):
     from remote_world import World
 
     w = World(sf, tmp_path, site, demo_build, gh_extra={"github_webhook_secret": ""})
     async with browser(w.app) as c:
         r = await send(c, "ping", {})
-        assert r.status_code == 503 and "not configured" in r.json()["detail"]
+        assert r.status_code == 404 and "not enabled" in r.json()["detail"]
 
 
 # ---- which deployments are even considered
