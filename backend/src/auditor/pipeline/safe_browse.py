@@ -24,8 +24,9 @@ class BlockedByGuard(RuntimeError):
 
 
 class BrowserGuard:
-    def __init__(self, proxy: SafeProxy):
+    def __init__(self, proxy: SafeProxy, *, browser_args: list[str] | None = None):
         self.proxy = proxy
+        self.browser_args = list(browser_args or [])  # extra Chromium arguments (tests only)
 
     @property
     def violations(self) -> list[str]:
@@ -49,4 +50,5 @@ async def launch_browser(pw, **launch_kwargs):
     guard = GUARD.get()
     if guard:
         launch_kwargs["proxy"] = guard.proxy.playwright_settings()
+        launch_kwargs["args"] = [*launch_kwargs.get("args", []), *guard.browser_args]
     return await pw.chromium.launch(**launch_kwargs)

@@ -6,6 +6,7 @@ from collections.abc import Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -21,8 +22,12 @@ from .config import settings as default_settings
 from .disclaimers import DRAFT_BANNER
 from .models import AuditRun, RunStatus
 from .pipeline.events import EventBus
+from .pipeline.safe_browse import BrowserGuard
+from .pipeline.safe_proxy import SafeProxy
 from .projects import Project, load_projects
 from .safe_net import SafeNet
+from .scm.github_app import GitHubAppAuth
+from .scm.github_repo import GitHubRepoClient
 from .secrets import SecretsError, Vault
 from .storage.evidence_store import EvidenceStore
 
@@ -41,6 +46,16 @@ def default_client(cfg: Settings):
     return ScriptedClient()  # clearly labelled in every run summary
 
 
+def _default_github(cfg: Settings):
+    """Builds a client for one repository, authenticated as the Attest App installation. Fails clearly if the App is not set up."""
+    def make(installation_id: int, repo: str) -> GitHubRepoClient:
+        if not (cfg.github_app_id and cfg.github_app_private_key):
+            raise RuntimeError("the GitHub App is not configured on this server (GITHUB_APP_ID and GITHUB_APP_PRIVATE_KEY)")
+        auth = GitHubAppAuth(cfg.github_app_id, cfg.github_app_private_key.replace("\\n", "\n"), installation_id, api_base=cfg.github_api_base)
+        return GitHubRepoClient(repo, auth)
+    return make
+
+
 @dataclass
 class Deps:
     sf: sessionmaker
@@ -52,6 +67,9 @@ class Deps:
     projects: dict[str, Project]
     vault: Vault | None = None
     net: SafeNet | None = None
+    guard_factory: Callable | None = None  # () -> BrowserGuard: one per live-site run
+    github_factory: Callable | None = None  # (installation_id, 'owner/name') -> GitHubRepoClient
+    scratch_root: str = ""
     verify_last: dict[str, float] = field(default_factory=dict)  # project id -> when it was last checked
     log: logging.Logger = field(default_factory=lambda: log)
     tasks: dict[str, asyncio.Task] = field(default_factory=dict)
@@ -135,7 +153,8 @@ class Deps:
 
 def create_app(sf: sessionmaker | None = None, *, store: EvidenceStore | None = None,
                client_factory: Callable | None = None, work_dir: str | None = None,
-               config: Settings | None = None) -> FastAPI:
+               config: Settings | None = None, guard_factory: Callable | None = None,
+               github_factory: Callable | None = None) -> FastAPI:
     cfg = config or default_settings
     if sf is None:
         from .db import Base, SessionLocal, engine
@@ -182,6 +201,9 @@ def create_app(sf: sessionmaker | None = None, *, store: EvidenceStore | None = 
     app.state.deps = Deps(sf=sf, store=store or EvidenceStore(cfg.evidence_dir), bus=EventBus(sf),
                           client_factory=client_factory or (lambda: default_client(cfg)),
                           work_dir=work_dir or cfg.evidence_dir, cfg=cfg, projects=projects, vault=vault,
+                          guard_factory=guard_factory or (lambda: BrowserGuard(SafeProxy())),
+                          github_factory=github_factory or _default_github(cfg),
+                          scratch_root=str(Path(work_dir or cfg.evidence_dir) / "scratch"),
                           net=SafeNet(allow_insecure=cfg.allow_insecure_sites, allowed_ports=tuple(cfg.allowed_site_ports)))
     app.include_router(accounts_router)
     app.include_router(projects_router)

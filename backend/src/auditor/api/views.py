@@ -25,6 +25,7 @@ from .schemas import PullRequestRow, RunMeta, StageOut
 
 TERMINAL = {RunStatus.complete, RunStatus.failed, RunStatus.cancelled, RunStatus.reviewed, RunStatus.exported}
 PUBLISHABLE = {"regress_ok"}  # proved on the patched build and no regression
+REMOTE_PUBLISHABLE = {"fix_authored", "proved", "regress_ok"}  # live-site runs: a proposal may become a pull request before it is proved
 PROVED = {"proved", "regress_ok"}
 
 
@@ -38,7 +39,7 @@ def build_meta(db, run: AuditRun, page_count: int, publish: bool) -> RunMeta:
     base = db.scalar(select(FixAttempt.base_sha).join(Finding, Finding.id == FixAttempt.finding_id)
                      .where(Finding.run_id == run.id, FixAttempt.base_sha != "").limit(1))
     return RunMeta(
-        project=run.target_url.removeprefix("project:") if run.target_url.startswith("project:") else None,
+        mode=cfg.get("mode", "local"), project=run.target_url.removeprefix("project:") if run.target_url.startswith("project:") else None,
         base_branch=cfg.get("base_branch"), base_sha=(base or None) and base[:7], started_at=run.created_at.isoformat(),
         duration_s=_secs(run.created_at, run.finished_at), page_count=page_count, publish=bool(cfg.get("allow_push", publish)),
         model_tokens_used=summary.get("model_tokens_used"), model_token_budget=summary.get("model_token_budget"))
@@ -78,8 +79,11 @@ def build_stages(db, run: AuditRun) -> list[StageOut]:
     new_n = sum(r.regressions_count for r in regs)
     rules = max((len(r.criteria_checked or []) for r in regs), default=0)
     with_probes = bool((run.config or {}).get("with_probes"))
+    remote = (run.config or {}).get("mode") == "remote"
 
     def state(key: str) -> str:
+        if remote and key == "reprove":
+            return "waiting"  # proof of a live-site fix comes from its pull request's preview deployment, later
         if key in finished or (done_run and ok and key in started):
             return "done"
         if key in started:
@@ -104,6 +108,8 @@ def build_stages(db, run: AuditRun) -> list[StageOut]:
             st = "waiting"  # the re-prove stage covers both; only one bar pulses at a time
         secs = dur(ev) if key != "regress" else None
         shown = detail if st == "done" else ""
+        if remote and key in ("prove", "regress"):
+            shown = "starts when your preview deployment is ready" if key == "prove" else ""
         if shown and secs is not None:
             shown += f" · {_fmt(secs)}"
         out.append(StageOut(key=key, title=title, state=st, detail=shown, seconds=secs))
@@ -147,7 +153,7 @@ def build_pull_requests(db, run: AuditRun) -> list[PullRequestRow]:
             proof = "fix_failed"
         else:
             proof = "not_retested"
-        publishable = status in PUBLISHABLE
+        publishable = status in (REMOTE_PUBLISHABLE if (run.config or {}).get("mode") == "remote" else PUBLISHABLE)
         decision = ("held_back" if not publishable else "accepted" if d and d.action == "accept_pr"
                     else "rejected" if d and d.action == "reject_pr" else "awaiting")
         file, added, removed = _diff_stats(fa.diff)

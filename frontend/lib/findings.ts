@@ -1,6 +1,6 @@
 import type { Dashboard, FindingRow } from "./api";
 
-export type Kind = "proved" | "needs_human" | "not_retested" | "fix_failed" | "regression" | "in_progress";
+export type Kind = "proved" | "ready" | "pr_open" | "needs_human" | "not_retested" | "fix_failed" | "regression" | "in_progress";
 
 /** Backend status -> what the reviewer sees. */
 export function kindOf(status: string): Kind {
@@ -8,6 +8,10 @@ export function kindOf(status: string): Kind {
     case "regress_ok":
     case "proved":
       return "proved";
+    case "fix_authored":
+      return "ready";
+    case "pr_open":
+      return "pr_open";
     case "needs_human":
       return "needs_human";
     case "inconclusive":
@@ -23,6 +27,8 @@ export function kindOf(status: string): Kind {
 
 export const KIND: Record<Kind, { long: string; short: string; fg: string; bg: string }> = {
   proved: { long: "Fixed and proved, no regressions", short: "Proved", fg: "text-ok", bg: "bg-ok-bg" },
+  ready: { long: "Fix ready for review, not yet proved", short: "Ready for review", fg: "text-accent", bg: "bg-tint" },
+  pr_open: { long: "Pull request open, waiting for proof", short: "PR open", fg: "text-accent", bg: "bg-tint" },
   needs_human: { long: "Needs a person", short: "Needs a person", fg: "text-body", bg: "bg-neutral-bg" },
   not_retested: { long: "Could not be re-tested", short: "Not re-tested", fg: "text-warn", bg: "bg-warn-bg" },
   fix_failed: { long: "Fix did not work", short: "Fix failed", fg: "text-bad", bg: "bg-bad-bg" },
@@ -40,10 +46,11 @@ export const SEVERITY: Record<Severity, { label: string; fg: string; bg: string 
   minor: { label: "Minor", fg: "text-sev-minor", bg: "bg-sev-minor" },
 };
 
-export type FilterKey = "all" | "fixed" | "human" | "unproven";
+export type FilterKey = "all" | "fixed" | "ready" | "human" | "unproven";
 export const FILTERS: { key: FilterKey; label: string }[] = [
   { key: "all", label: "All" },
   { key: "fixed", label: "Fixed and proved" },
+  { key: "ready", label: "Ready for review" },
   { key: "human", label: "Needs a person" },
   { key: "unproven", label: "Not proved" },
 ];
@@ -57,6 +64,7 @@ export function matches(f: { status: string }, key: FilterKey): boolean {
   switch (key) {
     case "all": return true;
     case "fixed": return k === "proved";
+    case "ready": return k === "ready" || k === "pr_open";
     case "human": return k === "needs_human";
     case "unproven": return k === "not_retested" || k === "fix_failed" || k === "regression";
   }

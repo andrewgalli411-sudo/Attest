@@ -224,7 +224,7 @@ export function FindingReview({ runId, fid }: { runId: string; fid: string }) {
                     <div className="overflow-hidden rounded-md border border-line bg-surface">
                       <div className="flex flex-wrap justify-between gap-2 border-b border-line bg-subtle px-3 py-2 font-mono text-xs">
                         <span>{diffFile(f.fix.diff)}</span>
-                        <span className="text-muted">{f.fix.branch} · build passed{f.fix.pr_url ? <> · <a href={f.fix.pr_url}>pull request</a></> : null}</span>
+                        <span className="text-muted">{f.mode === "remote" ? "proposed change · not built here" : `${f.fix.branch} · build passed`}{f.fix.pr_url ? <> · <a href={f.fix.pr_url}>pull request</a></> : null}</span>
                       </div>
                       <div tabIndex={0} role="region" aria-label="Code change" className="overflow-x-auto py-1.5">
                         {lines.map((l, i) => (
@@ -236,6 +236,17 @@ export function FindingReview({ runId, fid }: { runId: string; fid: string }) {
                         ))}
                       </div>
                     </div>
+                  </Step>
+                )}
+
+                {f.fix && !f.proof && (
+                  <Step n={5} title="Proof on the patched build" tone="warn">
+                    <p className="m-0 max-w-[640px]">
+                      <strong className="text-warn">Not proved yet.</strong>{" "}
+                      {f.mode === "remote"
+                        ? "Attest does not build your site, so this fix has not been tested. After you open the pull request, its preview deployment is re-audited and the result appears here."
+                        : "This fix has not been re-tested on a patched build yet."}
+                    </p>
                   </Step>
                 )}
 

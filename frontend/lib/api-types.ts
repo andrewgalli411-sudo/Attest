@@ -433,6 +433,11 @@ export interface components {
         };
         /** Counts */
         Counts: {
+            /**
+             * Awaiting Proof
+             * @default 0
+             */
+            awaiting_proof: number;
             /** Fixed */
             fixed: number;
             /** In Progress */
@@ -533,6 +538,11 @@ export interface components {
              * @default 1
              */
             instances: number;
+            /**
+             * Mode
+             * @default local
+             */
+            mode: string;
             /** Notice */
             notice: string;
             /** Page */
@@ -906,6 +916,11 @@ export interface components {
             base_sha?: string | null;
             /** Duration S */
             duration_s?: number | null;
+            /**
+             * Mode
+             * @default local
+             */
+            mode: string;
             /** Model Token Budget */
             model_token_budget?: number | null;
             /** Model Tokens Used */

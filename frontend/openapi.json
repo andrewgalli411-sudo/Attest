@@ -67,6 +67,11 @@
       },
       "Counts": {
         "properties": {
+          "awaiting_proof": {
+            "default": 0,
+            "title": "Awaiting Proof",
+            "type": "integer"
+          },
           "fixed": {
             "title": "Fixed",
             "type": "integer"
@@ -359,6 +364,11 @@
             "default": 1,
             "title": "Instances",
             "type": "integer"
+          },
+          "mode": {
+            "default": "local",
+            "title": "Mode",
+            "type": "string"
           },
           "notice": {
             "title": "Notice",
@@ -1500,6 +1510,11 @@
               }
             ],
             "title": "Duration S"
+          },
+          "mode": {
+            "default": "local",
+            "title": "Mode",
+            "type": "string"
           },
           "model_token_budget": {
             "anyOf": [

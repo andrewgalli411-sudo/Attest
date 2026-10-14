@@ -30,7 +30,9 @@ from ..models import (
     RunStatus,
     TriageVerdict,
 )
+from ..pipeline.safe_browse import GUARD
 from ..remediate import RemediationConfig, run_remediation
+from ..remote import RemoteConfig, run_remote_audit
 from ..report.html import run_report
 from .auth import Principal, require_auth
 from .publish import PublishRefused, publish_accepted
@@ -143,8 +145,10 @@ def _pages(specs) -> list[dict] | None:
     return None if specs is None else [{"path": s.path, "label": s.label or s.path} for s in specs]
 
 
-def _resolve(body: StartRun, d) -> tuple[str, RemediationConfig | None]:
+def _resolve(body: StartRun, d, who: Principal | None = None) -> tuple[str, RemediationConfig | RemoteConfig | None]:
     """Turn a request into a run configuration, or raise. Callers can never inject commands."""
+    if body.project and who is not None and not who.is_local:
+        return _resolve_remote(body, d, who)
     if body.project:
         proj = d.projects.get(body.project)
         if proj is None:
@@ -180,12 +184,12 @@ def _resolve(body: StartRun, d) -> tuple[str, RemediationConfig | None]:
 
 @router.post("/runs", response_model=RunOut, status_code=202)
 async def start_run(body: StartRun, d=Depends(deps), who: Principal = Depends(require_auth)):
-    target, cfg = _resolve(body, d)
+    target, cfg = _resolve(body, d, who)
     if d.active_runs() >= d.cfg.max_concurrent_runs:
         raise HTTPException(429, "a run is already in progress; wait for it to finish or cancel it",
                             headers={"Retry-After": "30"})
     with d.sf() as db:
-        run = AuditRun(target_url=target, owner_id=who.account_id)
+        run = AuditRun(target_url=target, owner_id=who.account_id, project_id=getattr(cfg, "project_id", None))
         db.add(run)
         db.commit()
         db.refresh(run)
@@ -198,9 +202,44 @@ async def start_run(body: StartRun, d=Depends(deps), who: Principal = Depends(re
     return out
 
 
-async def _execute(d, run_id: str, body: StartRun, cfg: RemediationConfig | None) -> None:
+def _resolve_remote(body: StartRun, d, who: Principal) -> tuple[str, RemoteConfig]:
+    """A signed-in person's own project: audit the live site, read the repository through the GitHub App."""
+    with d.sf() as db:
+        p = db.scalar(select(ProjectRecord).where(ProjectRecord.owner_id == who.account_id, ProjectRecord.name == body.project))
+        if p is None:
+            raise HTTPException(404, f"unknown project {body.project!r}")
+        if p.verified_at is None:
+            raise HTTPException(409, "prove you own this site first (Projects > Verify); Attest only audits sites you control")
+        if not (d.cfg.github_app_id and d.cfg.github_app_private_key):
+            raise HTTPException(503, "this server is not connected to GitHub yet (the GitHub App is not configured)")
+        auth = d.vault.open(p.sealed_auth) if p.sealed_auth else None
+        pages = _pages(body.pages) or p.pages
+        return f"project:{p.name}", RemoteConfig(
+            project_id=p.id, repo=p.github_repo, installation_id=p.installation_id, base_branch=p.default_branch,
+            site_url=p.site_url, pages=pages, scratch_root=Path(d.scratch_root), auth=auth, with_probes=body.with_probes,
+            triage_model=d.cfg.triage_model, fix_model=d.cfg.fix_model, send_screenshots_to_model=d.cfg.send_screenshots_to_model,
+            model_token_budget=d.cfg.model_token_budget, max_findings_per_page=d.cfg.max_findings_per_page,
+            refusal_fallback=d.cfg.refusal_fallback, only_rules=body.only_rules, max_fixes=body.max_fixes)
+
+
+async def _execute_remote(d, run_id: str, rc: RemoteConfig) -> None:
+    guard = d.guard_factory()  # one proxy per run: its own credentials, its own limits
+    async with guard.proxy:
+        token = GUARD.set(guard)
+        try:
+            github = d.github_factory(rc.installation_id, rc.repo)
+            await asyncio.wait_for(run_remote_audit(run_id, d.sf, d.store, d.bus, d.client_factory(), rc, github),
+                                   timeout=d.cfg.run_timeout_s)
+        finally:
+            GUARD.reset(token)
+
+
+async def _execute(d, run_id: str, body: StartRun, cfg: RemediationConfig | RemoteConfig | None) -> None:
     """Background task. Every way this can end is recorded on the run; nothing is left 'running'."""
     try:
+        if isinstance(cfg, RemoteConfig):
+            await _execute_remote(d, run_id, cfg)
+            return
         if cfg is None:  # demo
             repo, _ = await asyncio.to_thread(prepare_demo_repo, Path(d.work_dir) / "demos" / run_id)
             cfg = RemediationConfig(repo_path=repo, dev_command=DEV_COMMAND, check_commands=["pnpm build"],
@@ -303,8 +342,9 @@ def dashboard(run_id: str, d=Depends(deps), who: Principal = Depends(require_aut
     human = sum(f.status.value == "needs_human" for f in findings)
     incon = sum(f.status.value in ("inconclusive", "prove_failed") for f in findings)
     done = run.status in TERMINAL
-    counts = Counts(total=len(findings), fixed=fixed, needs_human=human, inconclusive=incon, regressions=regress,
-                    in_progress=0 if done else len(findings) - fixed - human - incon)
+    awaiting = sum(f.status.value in ("fix_authored", "pr_open") for f in findings)
+    counts = Counts(total=len(findings), fixed=fixed, awaiting_proof=awaiting, needs_human=human, inconclusive=incon,
+                    regressions=regress, in_progress=0 if done else len(findings) - fixed - human - incon - awaiting)
     headline = summary.get("headline") or f"{len(findings)} issues - {fixed} fixed - {human} need you"
     base = {s.page_state_id: s.score for s in scores if s.phase == "baseline"}
     after = {s.page_state_id: s.score for s in scores if s.phase == "after"}
@@ -344,6 +384,7 @@ def finding_detail(finding_id: str, d=Depends(deps), who: Principal = Depends(re
         return FindingDetail(
             selector=selector, source=f"{src['file']}:{src['line']}" if src.get("file") and src.get("line") else None,
             sc_titles=titles, decision=dec, instances=int(detail.get("instances") or 1),
+            mode=(db.get(AuditRun, f.run_id).config or {}).get("mode", "local"),
             id=f.id, run_id=f.run_id, rule_id=f.rule_id, sc_ids=f.sc_ids, severity=f.severity.value,
             status=f.status.value, page=ps.state_label or urlsplit(ps.url).path, impact_text=f.impact_text,
             triage=None if v is None else TriageOut(

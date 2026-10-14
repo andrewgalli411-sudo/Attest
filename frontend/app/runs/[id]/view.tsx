@@ -6,7 +6,7 @@ import { api, type Dashboard } from "@/lib/api";
 import { useCrumbs } from "@/components/shell/context";
 import { btn, Card, DraftChip, ErrorNote, Loading, Page, RunStatusChip, Segmented, SeverityMark, StatusPill } from "@/components/ui";
 import { duration, plural, shortId, when } from "@/lib/format";
-import { countFor, FILTERS, flatten, isFinished, kindOf, matches, SEVERITIES, type FilterKey } from "@/lib/findings";
+import { countFor, FILTERS, flatten, isFinished, matches, SEVERITIES, type FilterKey } from "@/lib/findings";
 import { useRunEvents } from "@/lib/useRunEvents";
 
 const STAGE_TEXT: Record<string, string> = {
@@ -53,8 +53,10 @@ export default function RunView({ id }: { id: string }) {
   const failed = data?.run.status === "failed";
   const cancelled = data?.run.status === "cancelled";
   const errEvent = events.find((e) => e.type === "error");
-  const firstFixed = flat.find((f) => kindOf(f.status) === "proved");
-  const provedCount = countFor(flat, "fixed");
+  // A live-site run has proposals, not proofs: the review button leads to whichever the run actually has.
+  const reviewFilter: FilterKey = countFor(flat, "fixed") > 0 ? "fixed" : "ready";
+  const firstFixed = flat.find((f) => matches(f, reviewFilter));
+  const provedCount = countFor(flat, reviewFilter);
 
   async function cancel() {
     setCancelling(true);
@@ -63,7 +65,9 @@ export default function RunView({ id }: { id: string }) {
 
   const current = data?.stages.find((s) => s.state === "current");
   const statusLine = !data ? "" : running ? (current ? STAGE_TEXT[current.key] : "Starting…")
-    : failed ? "The run failed." : cancelled ? "Run cancelled." : `Run complete. Repository restored to ${data.meta.base_branch ?? "main"}.`;
+    : failed ? "The run failed." : cancelled ? "Run cancelled."
+    : data.meta.mode === "remote" ? "Run complete. Nothing was built here: fixes are proposals until their preview deployment is checked."
+    : `Run complete. Repository restored to ${data.meta.base_branch ?? "main"}.`;
 
   const unknown = (n: number) => (running && n === 0 ? "—" : n);
 
@@ -99,8 +103,8 @@ export default function RunView({ id }: { id: string }) {
                 <>
                   <Link href={`/reports/${id}`} className={`${btn.secondary} no-underline`}>Evidence report</Link>
                   {firstFixed && (
-                    <Link href={`/runs/${id}/findings/${firstFixed.id}?filter=fixed`} className={`${btn.primary} text-white no-underline hover:text-white`}>
-                      Review {plural(provedCount, "change")}
+                    <Link href={`/runs/${id}/findings/${firstFixed.id}?filter=${reviewFilter}`} className={`${btn.primary} text-white no-underline hover:text-white`}>
+                      Review {plural(provedCount, reviewFilter === "fixed" ? "change" : "proposed fix")}
                     </Link>
                   )}
                 </>
@@ -132,7 +136,7 @@ export default function RunView({ id }: { id: string }) {
             </div>
             {[
               { label: "Issues found", value: data.counts.total, note: `${data.severity.critical ?? 0} critical · ${data.severity.serious ?? 0} serious`, cls: "" },
-              { label: "Fixed and proved", value: unknown(data.counts.fixed), note: "as pull requests", cls: "text-ok" },
+              { label: "Fixed and proved", value: unknown(data.counts.fixed), note: (data.counts.awaiting_proof ?? 0) > 0 ? `${data.counts.awaiting_proof} proposed, not yet proved` : "as pull requests", cls: "text-ok" },
               { label: "Need a person", value: unknown(data.counts.needs_human), note: "work orders", cls: "" },
               { label: "Regressions", value: running && data.counts.fixed === 0 ? "—" : data.counts.regressions, note: `${data.stages.find((s) => s.key === "regress")?.detail.match(/(\d+) rules/)?.[1] ?? 0} rules re-checked`, cls: "" },
             ].map((c) => (

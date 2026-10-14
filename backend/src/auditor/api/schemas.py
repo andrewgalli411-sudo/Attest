@@ -141,6 +141,7 @@ class PageOut(BaseModel):
 class Counts(BaseModel):
     total: int
     fixed: int
+    awaiting_proof: int = 0  # a fix exists but has not been re-tested on a build yet (live-site runs)
     needs_human: int
     in_progress: int
     inconclusive: int
@@ -156,6 +157,7 @@ class StageOut(BaseModel):
 
 
 class RunMeta(BaseModel):
+    mode: str = "local"  # local: fixes proved on a build we ran | remote: a live site, proof waits for a preview deployment
     project: str | None = None
     base_branch: str | None = None
     base_sha: str | None = None
@@ -249,6 +251,7 @@ class FindingDetail(BaseModel):
     sc_titles: dict[str, str] = Field(default_factory=dict)
     decision: str | None = Field(None, description="accept_pr | reject_pr: the latest decision a person recorded")
     instances: int = 1
+    mode: str = "local"  # remote: a live-site run, so a fix was proposed from source but never built or run here
 
 
 class DecisionIn(BaseModel):
